@@ -33,13 +33,15 @@ dist/
 # ======================
 # Python / FastAPI
 # ======================
-**/venv/
-**/__pycache__/
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Ignore any virtual environment anywhere
 venv/
-.env
+**/venv/
+project/**/venv/
 
 # ======================
 # IDE Files
