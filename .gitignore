@@ -1,40 +1,65 @@
 # ======================
 # Java / Spring Boot
 # ======================
-target/
 *.class
 *.log
+*.ctxt
+.mtj.tmp/
+
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+hs_err_pid*
+replay_pid*
+
+target/
 
 # ======================
-# React / Node
+# React / Node (Vite)
 # ======================
 node_modules/
 dist/
+.vite/
+
+.env
+.env.local
+.env.development
+.env.production
 
 # ======================
-# Python
+# Python / FastAPI
 # ======================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Ignore virtual environments anywhere
 venv/
 **/venv/
+project/**/venv/
 
 # ======================
-# Runtime / Generated
+# Runtime / Generated Files
 # ======================
 uploads/
+coverage/
+build/
 
 # ======================
-# IDE
+# IDE Files
 # ======================
 .idea/
 .vscode/
 *.iml
 
 # ======================
-# OS
+# OS Files
 # ======================
 .DS_Store
 Thumbs.db
