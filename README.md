@@ -1,90 +1,128 @@
-# Relive
+Relive
 
 NLP-Driven Personal Media Retrieval System using Machine Learning
 
 Relive is a full-stack AI-powered media retrieval system that allows users to search personal photos using natural language queries such as:
 
-- "Show me beach photos from 2022"
-- "Photos with two people at night"
-- "Pictures of dogs in Ooty"
+"Show me beach photos from 2022"
+
+"Photos with two people at night"
+
+"Pictures of dogs in Ooty"
 
 The system combines computer vision, NLP, and semantic embeddings to enable intelligent media search.
 
----
-
-## Architecture
+Architecture
 
 Relive consists of three main components:
 
-### 1. Spring Boot Backend
-- User authentication (JWT)
-- Media metadata storage
-- Search APIs
-- Integration with ML service
+1. Spring Boot Backend
 
-### 2. FastAPI Vision Service
-- BLIP image captioning
-- spaCy noun phrase extraction
-- CLIP embedding generation
-- YOLO face detection
-- EXIF metadata extraction
-- Day/Night detection
+User authentication (JWT)
 
-### 3. React + Vite Frontend
-- User authentication
-- Media upload
-- Search interface
-- Dashboard and result display
+Media metadata storage
 
-## Tech Stack
+Search APIs
 
-Backend:
-- Java (Spring Boot)
-- MySQL / JPA
+Integration with ML service
 
-ML Service:
-- FastAPI
-- PyTorch
-- BLIP
-- CLIP
-- YOLOv8 (face model)
-- spaCy
+2. FastAPI Vision Service
 
-Frontend:
-- React
-- Vite
-- Axios
+BLIP image captioning
 
-## Folder Structure
+spaCy noun phrase extraction
 
-project/                      ← Repository Root (run commands from here)
+CLIP embedding generation
 
-│ 
+YOLO face detection
 
-├── project/                  ← Spring Boot Backend
+EXIF metadata extraction
 
-│   ├── src/main/java
+Day/Night detection
 
-│   └── vision-service/
+3. React + Vite Frontend
 
-│        └── main.py          ← FastAPI ML Service
+User authentication
 
+Media upload
+
+Search interface
+
+Dashboard and result display
+
+Tech Stack
+Backend
+
+Java (Spring Boot)
+
+MySQL
+
+Spring Data JPA
+
+JWT Authentication
+
+ML Service
+
+FastAPI
+
+PyTorch
+
+BLIP
+
+CLIP
+
+YOLOv8 (Face Detection Model)
+
+spaCy
+
+Frontend
+
+React
+
+Vite
+
+Axios
+
+Folder Structure
+project/                         # Repository Root (run commands from here)
 │
-└── relive-frontend/          ← React + Vite Frontend
+├── project/                     # Spring Boot Backend
+│   ├── src/main/java/
+│   ├── pom.xml
+│   └── vision-service/          # FastAPI ML Service
+│       ├── main.py
+│       ├── requirements.txt
+│       └── yolov8n-face-lindevs.pt
+│
+└── relive-frontend/             # React + Vite Frontend
+    ├── src/
+    ├── package.json
+    └── vite.config.js
 
-    └── src/
+⚠️ All commands below must be executed from the repository root folder (the top-most project folder).
 
- ## How to Run the Application
- All commands below must be executed from the repository root folder (the top-most project folder).
+How to Run the Application
 
-1️) Run Spring Boot Backend
+Make sure you are inside the repository root:
+
+cd project
+
+You should see:
+
+project/
+
+relive-frontend/
+
+.git
+
+1️⃣ Run Spring Boot Backend
 
 From repository root:
 
 cd project
 mvn spring-boot:run
 
-Backend will start at:
+Backend runs at:
 
 http://localhost:8080
 
@@ -94,16 +132,19 @@ MySQL is running
 
 Database credentials are configured correctly in application.properties
 
-2️) Run FastAPI ML Vision Service
+2️⃣ Run FastAPI ML Vision Service
 
 From repository root:
 
 cd project/vision-service
 Create virtual environment (first time only)
 python -m venv venv
-venv\Scripts\activate     # Windows
 
-Then install dependencies:
+Activate it (Windows):
+
+venv\Scripts\activate
+
+Install dependencies:
 
 pip install -r requirements.txt
 
@@ -111,11 +152,11 @@ Start the ML service:
 
 uvicorn main:app --reload --port 5000
 
-ML service will run at:
+ML service runs at:
 
 http://localhost:5000
 
-Swagger docs available at:
+Swagger API documentation available at:
 
 http://localhost:5000/docs
 3️⃣ Run React Frontend
@@ -123,26 +164,26 @@ http://localhost:5000/docs
 From repository root:
 
 cd relive-frontend
-npm install       # first time only
+npm install      # first time only
 npm run dev
 
 Frontend runs at:
 
 http://localhost:5173
-🔷 Important
+Important
 
-All three services must be running simultaneously:
+All three services must be running simultaneously.
 
 Service	Port
-Backend (Spring)	8080
+Backend (Spring Boot)	8080
 ML Service (FastAPI)	5000
 Frontend (React)	5173
 
-If ML service is not running, media processing will fail.
+If the ML service is not running, media processing will fail.
 
-If backend is not running, frontend API calls will fail.
+If the backend is not running, frontend API calls will fail.
 
-🔷 Full Startup Order (Recommended)
+Recommended Startup Order
 
 Start MySQL
 
@@ -152,16 +193,23 @@ Start Backend (port 8080)
 
 Start Frontend (port 5173)
 
-🔷 Example Complete Flow
-# From root
+Example Complete Startup Flow
+Terminal 1 (ML Service)
 cd project/vision-service
 venv\Scripts\activate
 uvicorn main:app --reload --port 5000
-
-# New terminal
+Terminal 2 (Backend)
 cd project
 mvn spring-boot:run
-
-# New terminal
+Terminal 3 (Frontend)
 cd relive-frontend
 npm run dev
+Branch Strategy
+
+main → Stable release branch
+
+dev → Active development branch
+
+feature/* → Feature-specific branches
+
+All major changes are merged using Pull Requests.
