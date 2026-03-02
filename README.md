@@ -1,215 +1,107 @@
-Relive
+# Relive
 
 NLP-Driven Personal Media Retrieval System using Machine Learning
 
 Relive is a full-stack AI-powered media retrieval system that allows users to search personal photos using natural language queries such as:
 
-"Show me beach photos from 2022"
-
-"Photos with two people at night"
-
-"Pictures of dogs in Ooty"
+- "Show me beach photos from 2022"
+- "Photos with two people at night"
+- "Pictures of dogs in Ooty"
 
 The system combines computer vision, NLP, and semantic embeddings to enable intelligent media search.
 
-Architecture
+---
+
+## Architecture
 
 Relive consists of three main components:
 
-1. Spring Boot Backend
+### 1. Spring Boot Backend
+- User authentication (JWT)
+- Media metadata storage
+- Search APIs
+- Integration with ML service
 
-User authentication (JWT)
+### 2. FastAPI Vision Service
+- BLIP image captioning
+- spaCy noun phrase extraction
+- CLIP embedding generation
+- YOLO face detection
+- EXIF metadata extraction
+- Day/Night detection
 
-Media metadata storage
+### 3. React + Vite Frontend
+- User authentication
+- Media upload
+- Search interface
+- Dashboard and result display
 
-Search APIs
+---
 
-Integration with ML service
+## Tech Stack
 
-2. FastAPI Vision Service
+Backend:
+- Java (Spring Boot)
+- MySQL / JPA
 
-BLIP image captioning
+ML Service:
+- FastAPI
+- PyTorch
+- BLIP
+- CLIP
+- YOLOv8 (face model)
+- spaCy
 
-spaCy noun phrase extraction
+Frontend:
+- React
+- Vite
+- Axios
 
-CLIP embedding generation
+---
 
-YOLO face detection
+## Folder Structure
 
-EXIF metadata extraction
+project/ - Root Folder (Run commands from here)
 
-Day/Night detection
+    |--- project/
+            |--- src/main/java - (Spring Boot Backend) 
+            |--- vision-service/main.py - (Python FastAPI ML Service) 
+    |--- relive-frontend 
+            |---src - (React with Vite Frontend) 
 
-3. React + Vite Frontend
 
-User authentication
+project (top-most folder) contains project (Spring Boot Backend and ML vision service) and relive-frontend (React Frontend). 
+## How to Run
 
-Media upload
-
-Search interface
-
-Dashboard and result display
-
-Tech Stack
-Backend
-
-Java (Spring Boot)
-
-MySQL
-
-Spring Data JPA
-
-JWT Authentication
-
-ML Service
-
-FastAPI
-
-PyTorch
-
-BLIP
-
-CLIP
-
-YOLOv8 (Face Detection Model)
-
-spaCy
-
-Frontend
-
-React
-
-Vite
-
-Axios
-
-Folder Structure
-project/                         # Repository Root (run commands from here)
-│
-├── project/                     # Spring Boot Backend
-│   ├── src/main/java/
-│   ├── pom.xml
-│   └── vision-service/          # FastAPI ML Service
-│       ├── main.py
-│       ├── requirements.txt
-│       └── yolov8n-face-lindevs.pt
-│
-└── relive-frontend/             # React + Vite Frontend
-    ├── src/
-    ├── package.json
-    └── vite.config.js
-
-⚠️ All commands below must be executed from the repository root folder (the top-most project folder).
-
-How to Run the Application
-
-Make sure you are inside the repository root:
+### Backend
 
 cd project
 
-You should see:
-
-project/
-
-relive-frontend/
-
-.git
-
-1️⃣ Run Spring Boot Backend
-
-From repository root:
-
-cd project
 mvn spring-boot:run
 
-Backend runs at:
 
-http://localhost:8080
-
-Make sure:
-
-MySQL is running
-
-Database credentials are configured correctly in application.properties
-
-2️⃣ Run FastAPI ML Vision Service
-
-From repository root:
+### Vision Service
 
 cd project/vision-service
-Create virtual environment (first time only)
-python -m venv venv
-
-Activate it (Windows):
-
-venv\Scripts\activate
-
-Install dependencies:
 
 pip install -r requirements.txt
 
-Start the ML service:
-
 uvicorn main:app --reload --port 5000
 
-ML service runs at:
 
-http://localhost:5000
-
-Swagger API documentation available at:
-
-http://localhost:5000/docs
-3️⃣ Run React Frontend
-
-From repository root:
+### Frontend
 
 cd relive-frontend
-npm install      # first time only
+
+npm install
+
 npm run dev
 
-Frontend runs at:
 
-http://localhost:5173
-Important
+## Branch Strategy
 
-All three services must be running simultaneously.
+- main → Stable release branch
+- dev → Integration branch
+- feature/* → Feature-specific branches
 
-Service	Port
-Backend (Spring Boot)	8080
-ML Service (FastAPI)	5000
-Frontend (React)	5173
-
-If the ML service is not running, media processing will fail.
-
-If the backend is not running, frontend API calls will fail.
-
-Recommended Startup Order
-
-Start MySQL
-
-Start ML service (port 5000)
-
-Start Backend (port 8080)
-
-Start Frontend (port 5173)
-
-Example Complete Startup Flow
-Terminal 1 (ML Service)
-cd project/vision-service
-venv\Scripts\activate
-uvicorn main:app --reload --port 5000
-Terminal 2 (Backend)
-cd project
-mvn spring-boot:run
-Terminal 3 (Frontend)
-cd relive-frontend
-npm run dev
-Branch Strategy
-
-main → Stable release branch
-
-dev → Active development branch
-
-feature/* → Feature-specific branches
-
-All major changes are merged using Pull Requests.
+All changes are merged via Pull Requests.
