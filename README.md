@@ -58,13 +58,20 @@ Frontend:
 ## Folder Structure
 
 project/                      ← Repository Root (run commands from here)
-│
+
+│ 
+
 ├── project/                  ← Spring Boot Backend
+
 │   ├── src/main/java
+
 │   └── vision-service/
+
 │        └── main.py          ← FastAPI ML Service
+
 │
 └── relive-frontend/          ← React + Vite Frontend
+
     └── src/
 
  ## How to Run the Application
