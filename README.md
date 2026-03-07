@@ -73,29 +73,89 @@ project/ - Root Folder (Run commands from here)
 project (top-most folder) contains project (Spring Boot Backend and ML vision service) and relive-frontend (React Frontend). 
 ## How to Run
 
-### Backend
+Setup Instructions
 
-cd project
+Follow the steps below to run Relive locally. (First Time)
 
-mvn spring-boot:run
+1. Clone the Repository
 
+    git clone https://github.com/<your-username>/Relive.git
+   
+    cd Relive
 
-### Vision Service
+3. Setup Backend (Spring Boot)
 
-cd project/vision-service
+Navigate to the backend project folder and run the application.
 
-pip install -r requirements.txt
+    cd project
+    mvn spring-boot:run
 
-uvicorn main:app --reload --port 5000
+The backend will start on: 
+http://localhost:8080
 
+3. Setup Vision Service (FastAPI + ML Models)
 
-### Frontend
+Navigate to the vision service folder.
 
-cd relive-frontend
+    cd project/vision-service
 
-npm install
+Create a Python virtual environment.
 
-npm run dev
+    python -m venv venv
+
+Activate the virtual environment.
+
+Windows :
+
+    venv\Scripts\activate
+
+Mac / Linux :
+
+    source venv/bin/activate
+
+Install required dependencies.
+
+    pip install -r requirements.txt
+
+Download the spaCy language model.
+
+    python -m spacy download en_core_web_sm
+
+Run the vision service.
+
+    uvicorn main:app --port 5000
+
+The ML service will start on: 
+http://localhost:5000
+
+4. Setup Frontend (React + Vite)
+
+Open a new terminal and navigate to the frontend folder.
+
+    cd relive-frontend
+
+Install dependencies.
+
+    npm install
+
+Run the development server.
+
+    npm run dev
+
+The frontend will start on: 
+http://localhost:5173
+
+5. Running the Full System
+
+Make sure the following three services are running:
+
+Spring Boot Backend	on port 8080
+
+Vision Service (FastAPI) on port 5000
+
+React Frontend on port 5173
+
+Once all services are running, open the frontend in your browser and start using Relive.
 
 
 ## Branch Strategy
