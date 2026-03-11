@@ -44,7 +44,7 @@ Backend:
 - Java (Spring Boot)
 - MySQL / JPA
 
-ML Service:
+ML Service: (Requires Python 3.11.9)
 - FastAPI
 - PyTorch
 - BLIP
