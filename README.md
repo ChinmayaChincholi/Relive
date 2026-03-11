@@ -59,18 +59,108 @@ Frontend:
 
 ---
 
-Setup AI Service
+### Setting Up the AI Service (relive-ai-service)
 
+The AI service is responsible for running machine learning models such as **BLIP captioning, YOLO face detection, CLIP embeddings, and spaCy NLP processing**. It is implemented using **FastAPI**.
+
+#### Prerequisites
+
+Make sure the following are installed:
+
+* Python **3.11**
+* pip
+* Git
+
+⚠️ Python 3.11 is recommended because some ML libraries (PyTorch, Ultralytics) may not work correctly with newer Python versions.
+
+---
+
+### Step 1: Navigate to the AI Service Folder
+
+```bash
 cd relive-ai-service
+```
 
+---
+
+### Step 2: Create a Virtual Environment
+
+```bash
 py -3.11 -m venv venv
+```
+
+---
+
+### Step 3: Activate the Virtual Environment
+
+**Windows**
+
+```bash
 venv\Scripts\activate
+```
 
+**Mac / Linux**
+
+```bash
+source venv/bin/activate
+```
+
+---
+
+### Step 4: Install Dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-python -m spacy download en_core_web_sm
+---
 
+### Step 5: Install spaCy Language Model
+
+The AI service requires the English spaCy model for NLP processing.
+
+```bash
+pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+```
+
+---
+
+### Step 6: Start the AI Service
+
+```bash
 uvicorn main:app --reload --port 5000
+```
+
+---
+
+### Step 7: Verify the Service
+
+If the service starts successfully, you should see:
+
+```
+Uvicorn running on http://127.0.0.1:5000
+```
+
+You can also test the API by opening:
+
+```
+http://127.0.0.1:5000/docs
+```
+
+This will show the **FastAPI interactive documentation**.
+
+---
+
+### Notes
+
+* Ensure the AI service is running **before starting the Spring Boot backend**.
+* The backend communicates with this service via HTTP APIs.
+* Default AI service URL:
+
+```
+http://localhost:5000
+```
+
 
 ## Folder Structure
 
