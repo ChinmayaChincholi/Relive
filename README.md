@@ -59,6 +59,19 @@ Frontend:
 
 ---
 
+Setup AI Service
+
+cd relive-ai-service
+
+py -3.11 -m venv venv
+venv\Scripts\activate
+
+pip install -r requirements.txt
+
+python -m spacy download en_core_web_sm
+
+uvicorn main:app --reload --port 5000
+
 ## Folder Structure
 
 project/ - Root Folder (Run commands from here)
