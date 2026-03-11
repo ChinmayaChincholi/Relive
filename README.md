@@ -59,39 +59,44 @@ Frontend:
 
 ---
 
-### Setting Up the AI Service (relive-ai-service)
+## Running the Relive Application
 
-The AI service is responsible for running machine learning models such as **BLIP captioning, YOLO face detection, CLIP embeddings, and spaCy NLP processing**. It is implemented using **FastAPI**.
+Relive consists of **three main services** that must be started separately:
 
-#### Prerequisites
+1. **AI Service** – FastAPI service running ML models
+2. **Backend** – Spring Boot API handling authentication, media metadata, and search
+3. **Frontend** – React web application for the user interface
 
-Make sure the following are installed:
+Start the services in the following order:
 
-* Python **3.11**
-* pip
-* Git
-
-⚠️ Python 3.11 is recommended because some ML libraries (PyTorch, Ultralytics) may not work correctly with newer Python versions.
+1. AI Service
+2. Backend
+3. Frontend
 
 ---
 
-### Step 1: Navigate to the AI Service Folder
+# 1. Setup and Run AI Service
+
+The AI service runs machine learning models such as **BLIP captioning, YOLO face detection, CLIP embeddings, and spaCy NLP processing**.
+
+### Prerequisites
+
+* Python **3.11**
+* pip
+
+### Step 1: Navigate to AI service folder
 
 ```bash
 cd relive-ai-service
 ```
 
----
-
-### Step 2: Create a Virtual Environment
+### Step 2: Create virtual environment
 
 ```bash
 py -3.11 -m venv venv
 ```
 
----
-
-### Step 3: Activate the Virtual Environment
+### Step 3: Activate virtual environment
 
 **Windows**
 
@@ -99,167 +104,181 @@ py -3.11 -m venv venv
 venv\Scripts\activate
 ```
 
-**Mac / Linux**
+**Mac/Linux**
 
 ```bash
 source venv/bin/activate
 ```
 
----
-
-### Step 4: Install Dependencies
+### Step 4: Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
-
-### Step 5: Install spaCy Language Model
-
-The AI service requires the English spaCy model for NLP processing.
+### Step 5: Install spaCy language model
 
 ```bash
 pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 ```
 
----
-
-### Step 6: Start the AI Service
+### Step 6: Run the AI service
 
 ```bash
 uvicorn main:app --reload --port 5000
 ```
 
----
-
-### Step 7: Verify the Service
-
-If the service starts successfully, you should see:
-
-```
-Uvicorn running on http://127.0.0.1:5000
-```
-
-You can also test the API by opening:
-
-```
-http://127.0.0.1:5000/docs
-```
-
-This will show the **FastAPI interactive documentation**.
-
----
-
-### Notes
-
-* Ensure the AI service is running **before starting the Spring Boot backend**.
-* The backend communicates with this service via HTTP APIs.
-* Default AI service URL:
+The service will start at:
 
 ```
 http://localhost:5000
 ```
 
+API documentation:
 
-## Folder Structure
+```
+http://localhost:5000/docs
+```
 
-project/ - Root Folder (Run commands from here)
+---
 
-    |--- project/
-            |--- src/main/java - (Spring Boot Backend) 
-            |--- vision-service/main.py - (Python FastAPI ML Service) 
-    |--- relive-frontend 
-            |---src - (React with Vite Frontend) 
+# 2. Setup and Run Backend (Spring Boot)
 
+The backend manages:
 
-project (top-most folder) contains project (Spring Boot Backend and ML vision service) and relive-frontend (React Frontend). 
-## How to Run
+* User authentication (JWT)
+* Media metadata storage
+* Communication with the AI service
+* Search APIs
 
-Setup Instructions
+### Prerequisites
 
-Follow the steps below to run Relive locally. (First Time)
+* Java **17+**
+* Maven
+* MySQL
 
-1. Clone the Repository
+### Step 1: Navigate to backend folder
 
-    git clone https://github.com/<your-username>/Relive.git
-   
-    cd Relive
+```bash
+cd relive-backend
+```
 
-3. Setup Backend (Spring Boot)
+### Step 2: Configure database
 
-Navigate to the backend project folder and run the application.
+Update `application.properties` with your MySQL credentials:
 
-    cd project
-    mvn spring-boot:run
+```
+spring.datasource.url=jdbc:mysql://localhost:3306/relive
+spring.datasource.username=YOUR_USERNAME
+spring.datasource.password=YOUR_PASSWORD
+```
 
-The backend will start on: 
+Create the database in MySQL:
+
+```sql
+CREATE DATABASE relive;
+```
+
+### Step 3: Run the backend
+
+Using Maven:
+
+```bash
+mvn spring-boot:run
+```
+
+Or run the main class from your IDE (IntelliJ / VS Code).
+
+Backend will start at:
+
+```
 http://localhost:8080
+```
 
-3. Setup Vision Service (FastAPI + ML Models)
+---
 
-Navigate to the vision service folder.
+# 3. Setup and Run Frontend (React)
 
-    cd project/vision-service
+The frontend provides the UI for:
 
-Create a Python virtual environment.
+* User login/register
+* Importing media
+* Viewing imported media
+* Natural language search
 
-    python -m venv venv
+### Prerequisites
 
-Activate the virtual environment.
+* Node.js **18+**
+* npm
 
-Windows :
+### Step 1: Navigate to frontend folder
 
-    venv\Scripts\activate
+```bash
+cd relive-frontend
+```
 
-Mac / Linux :
+### Step 2: Install dependencies
 
-    source venv/bin/activate
+```bash
+npm install
+```
 
-Install required dependencies.
+### Step 3: Start the frontend
 
-    pip install -r requirements.txt
+```bash
+npm run dev
+```
 
-Download the spaCy language model.
+Frontend will run at:
 
-    python -m spacy download en_core_web_sm
-
-Run the vision service.
-
-    uvicorn main:app --port 5000
-
-The ML service will start on: 
-http://localhost:5000
-
-4. Setup Frontend (React + Vite)
-
-Open a new terminal and navigate to the frontend folder.
-
-    cd relive-frontend
-
-Install dependencies.
-
-    npm install
-
-Run the development server.
-
-    npm run dev
-
-The frontend will start on: 
+```
 http://localhost:5173
+```
 
-5. Running the Full System
+---
 
-Make sure the following three services are running:
+# Application Architecture
 
-Spring Boot Backend	on port 8080
+```
+React Frontend (Port 5173)
+        │
+        ▼
+Spring Boot Backend (Port 8080)
+        │
+        ▼
+FastAPI AI Service (Port 5000)
+```
 
-Vision Service (FastAPI) on port 5000
+The backend communicates with the AI service using REST APIs to process images and generate metadata for intelligent search.
 
-React Frontend on port 5173
 
-Once all services are running, open the frontend in your browser and start using Relive.
 
+## Project Folder Structure
+
+```
+Relive
+│
+├── relive-backend/                 # Spring Boot backend
+│   ├── src/main/java/              # Controllers, services, repositories, entities
+│   ├── src/main/resources/         # application.properties, configs
+│   └── pom.xml
+│
+├── relive-frontend/                # React + Vite frontend
+│   ├── src/
+│   │   ├── pages/                  # Login, Register, Dashboard, Ask, ImportedMedia
+│   │   ├── components/             # Reusable UI components
+│   │   └── services/               # API calls to backend
+│   ├── public/
+│   └── package.json
+│
+├── relive-ai-service/              # FastAPI machine learning service
+│   ├── main.py                     # FastAPI entry point
+│   ├── requirements.txt            # Python dependencies
+│   ├── yolov8n-face-lindevs.pt     # YOLO face detection model
+│   └── venv/                       # Python virtual environment (not committed)
+│
+└── README.md
+```
 
 ## Branch Strategy
 
