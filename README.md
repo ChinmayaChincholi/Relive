@@ -125,19 +125,13 @@ pip install https://github.com/explosion/spacy-models/releases/download/en_core_
 ### Step 6: Run the AI service
 
 ```bash
-uvicorn main:app --reload --port 5000
+uvicorn app.main:app --reload --port 5000
 ```
 
 The service will start at:
 
 ```
 http://localhost:5000
-```
-
-API documentation:
-
-```
-http://localhost:5000/docs
 ```
 
 ---
