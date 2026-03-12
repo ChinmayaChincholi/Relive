@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import api from "../api/api";
+import { loginUser } from "../services/authService";
 
 export default function Login() {
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -10,35 +11,43 @@ export default function Login() {
   const navigate = useNavigate();
 
   const handleLogin = async () => {
+
     if (!email || !password) {
       alert("Enter email and password");
       return;
     }
 
     try {
+
       setLoading(true);
 
-      const res = await api.post("/auth/login", {
-        email,
-        password,
-      });
+      const data = await loginUser(email, password);
 
-      if (!res.data.token) {
+      if (!data.token) {
         alert("Invalid login response");
         return;
       }
 
-      localStorage.setItem("token", res.data.token);
+      localStorage.setItem("token", data.token);
+
       navigate("/dashboard");
+
     } catch (err) {
+
       alert("Login failed");
+
     } finally {
+
       setLoading(false);
+
     }
+
   };
 
   return (
+
     <div style={{ padding: 40 }}>
+
       <h2>Relive Login</h2>
 
       <input
@@ -47,6 +56,7 @@ export default function Login() {
         value={email}
         onChange={(e) => setEmail(e.target.value)}
       />
+
       <br /><br />
 
       <input
@@ -55,6 +65,7 @@ export default function Login() {
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
+
       <br /><br />
 
       <button onClick={handleLogin} disabled={loading}>
@@ -64,6 +75,9 @@ export default function Login() {
       <p>
         Don't have an account? <Link to="/register">Register</Link>
       </p>
+
     </div>
+
   );
+
 }

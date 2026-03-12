@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import api from "../api/api";
+import { registerUser } from "../services/authService";
 
 export default function Register() {
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -11,30 +12,36 @@ export default function Register() {
   const navigate = useNavigate();
 
   const handleRegister = async () => {
+
     if (!name || !email || !password) {
       alert("All fields are required");
       return;
     }
 
     try {
+
       setLoading(true);
 
-      await api.post("/auth/register", {
-        name,
-        email,
-        password,
-      });
+      await registerUser(name, email, password);
 
       navigate("/");
+
     } catch (err) {
+
       alert("Registration failed");
+
     } finally {
+
       setLoading(false);
+
     }
+
   };
 
   return (
+
     <div style={{ padding: 40 }}>
+
       <h2>Register</h2>
 
       <input
@@ -43,6 +50,7 @@ export default function Register() {
         value={name}
         onChange={(e) => setName(e.target.value)}
       />
+
       <br /><br />
 
       <input
@@ -51,6 +59,7 @@ export default function Register() {
         value={email}
         onChange={(e) => setEmail(e.target.value)}
       />
+
       <br /><br />
 
       <input
@@ -59,6 +68,7 @@ export default function Register() {
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
+
       <br /><br />
 
       <button onClick={handleRegister} disabled={loading}>
@@ -68,6 +78,9 @@ export default function Register() {
       <p>
         Already have an account? <Link to="/">Login</Link>
       </p>
+
     </div>
+
   );
+
 }

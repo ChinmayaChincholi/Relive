@@ -1,29 +1,37 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import api from "../api/api";
+import { searchNatural } from "../services/mediaService";
 
 export default function Ask() {
+
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
+
   const navigate = useNavigate();
 
   const handleSearch = async () => {
+
     if (!query.trim()) return;
 
     try {
-      const res = await api.get("/media/search-natural", {
-        params: { query }
-      });
 
-      setResults(res.data);
+      const data = await searchNatural(query);
+
+      setResults(data);
+
     } catch (err) {
+
       console.error("Search error:", err);
       alert("Search failed");
+
     }
+
   };
 
   return (
+
     <div style={{ padding: 40 }}>
+
       <h2>Ask Relive</h2>
 
       <input
@@ -42,10 +50,15 @@ export default function Ask() {
       </button>
 
       <div style={{ marginTop: 40 }}>
+
         {results.length === 0 ? (
+
           <p>No results yet.</p>
+
         ) : (
+
           results.map((item) => (
+
             <div
               key={item.id}
               style={{
@@ -55,19 +68,28 @@ export default function Ask() {
                 borderRadius: 8,
               }}
             >
+
               <p><strong>File:</strong> {item.fileName}</p>
               <p><strong>Caption:</strong> {item.sceneCaption}</p>
               <p><strong>Date Taken:</strong> {item.dateTaken || "N/A"}</p>
               <p><strong>Status:</strong> {item.status}</p>
+
             </div>
+
           ))
+
         )}
+
       </div>
 
       <br />
+
       <button onClick={() => navigate("/dashboard")}>
         Back to Dashboard
       </button>
+
     </div>
+
   );
+
 }
