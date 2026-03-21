@@ -1,6 +1,6 @@
 # Relive
 
-NLP-Driven Personal Media Retrieval System using Machine Learning
+AI-powered personal media retrieval system using Computer Vision, NLP, and semantic search
 
 Relive is a full-stack AI-powered media retrieval system that allows users to search personal photos using natural language queries such as:
 
@@ -9,6 +9,18 @@ Relive is a full-stack AI-powered media retrieval system that allows users to se
 - "Pictures of dogs in Ooty"
 
 The system combines computer vision, NLP, and semantic embeddings to enable intelligent media search.
+
+---
+
+## Key Features
+
+- 🔍 Natural language photo search (e.g., "dog at beach at night")
+- 🧠 CLIP-based semantic vector search using FAISS
+- 🖼️ Automatic image captioning using BLIP
+- 🏷️ Object extraction for keyword-based retrieval
+- 👤 Face detection (YOLO-based)
+- 📅 Metadata extraction (date, time, EXIF)
+- ⚡ Hybrid search (semantic + metadata + keyword matching)
 
 ---
 
@@ -24,11 +36,12 @@ Relive consists of three main components:
 
 ### 2. FastAPI AI Service
 - BLIP image captioning
-- spaCy noun phrase extraction
-- CLIP embedding generation
-- YOLO face detection
-- EXIF metadata extraction
-- Day/Night detection
+- CLIP embedding generation (image + text)
+- FAISS vector similarity search
+- Semantic object extraction from captions
+- EXIF metadata extraction (planned/improving)
+- YOLO face detection (planned)
+
 
 ### 3. React + Vite Frontend
 - User authentication
@@ -37,7 +50,23 @@ Relive consists of three main components:
 - Dashboard and result display
 
 ---
+## How Search Works
 
+1. Image is uploaded
+2. AI Service:
+    - Generates caption using BLIP
+    - Extracts semantic objects
+    - Generates CLIP embedding
+    - Stores embedding in FAISS index
+3. User query:
+    - Converted to CLIP text embedding
+    - FAISS retrieves similar images
+4. Backend:
+    - Applies filters (user, status, metadata)
+    - Combines semantic + keyword matching
+5. Results returned to frontend
+
+---
 ## Tech Stack
 
 Backend:
@@ -259,17 +288,24 @@ Relive
 │
 ├── relive-frontend/                # React + Vite frontend
 │   ├── src/
-│   │   ├── pages/                  # Login, Register, Dashboard, Ask, ImportedMedia
+│   │   ├── pages/                  # Login, Register, Dashboard, Ask, Media
 │   │   ├── components/             # Reusable UI components
-│   │   └── services/               # API calls to backend
+│   │   └── services/               # API calls (auth, media, search)
 │   ├── public/
 │   └── package.json
 │
-├── relive-ai-service/              # FastAPI machine learning service
+├── relive-ai-service/              # FastAPI ML + NLP service
+│   ├── app/
+│   │   ├── models/                 # CLIP, BLIP, YOLO models
+│   │   ├── routes/                 # analyze, semantic search endpoints
+│   │   ├── services/               # processing pipeline, FAISS indexing
+│   │   └── utils/                  # helper utilities
+│   │
 │   ├── main.py                     # FastAPI entry point
 │   ├── requirements.txt            # Python dependencies
-│   ├── yolov8n-face-lindevs.pt     # YOLO face detection model
-│   └── venv/                       # Python virtual environment (not committed)
+│   ├── model files/                # YOLO weights, etc. (not committed)
+│   ├── vector index files/         # FAISS index (not committed)
+│   └── venv/                       # virtual environment (not committed)
 │
 └── README.md
 ```
