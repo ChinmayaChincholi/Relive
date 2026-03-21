@@ -20,12 +20,21 @@ print("BLIP loaded.")
 
 def generate_caption(image):
 
-    inputs = processor(image, return_tensors="pt").to(device)
+    inputs = processor(
+        images=image,
+        return_tensors="pt"
+    ).to(device)
 
     with torch.no_grad():
 
-        output = model.generate(**inputs, max_length=40)
+        output = model.generate(
+            **inputs,
+            max_length=40
+        )
 
-    caption = processor.decode(output[0], skip_special_tokens=True)
+    caption = processor.decode(
+        output[0],
+        skip_special_tokens=True
+    )
 
     return caption

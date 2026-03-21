@@ -52,14 +52,6 @@ public class MediaService {
         );
     }
 
-    public List<Media> searchByObject(String object, String email) {
-        return mediaSearchService.searchByObject(object, email);
-    }
-
-    public List<Media> searchByObjectAndYear(String object, int year, String email) {
-        return mediaSearchService.searchByObjectAndYear(object, year, email);
-    }
-
     public List<Media> searchByNaturalQuery(String query, String email) {
         return mediaSearchService.searchByNaturalQuery(query, email);
     }

@@ -1,6 +1,7 @@
 from PIL import Image
 import spacy
 
+from app.services.vector_index import add_vector
 from app.models.blip_model import generate_caption
 from app.models.clip_model import get_image_embedding
 from app.models.yolo_model import detect_faces
@@ -29,7 +30,7 @@ def extract_noun_phrases(caption):
     return list(set(phrases))
 
 
-def analyze_image(file_path):
+def analyze_image(file_path, media_id):
 
     original_image = Image.open(file_path)
 
@@ -53,6 +54,8 @@ def analyze_image(file_path):
     time_of_day = detect_day_night(image)
 
     embedding = get_image_embedding(image)
+
+    add_vector(media_id, embedding)
 
     return {
         "caption": caption,

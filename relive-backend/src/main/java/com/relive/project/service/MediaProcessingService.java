@@ -29,7 +29,7 @@ public class MediaProcessingService {
 
         try {
 
-            VisionResponse visionData = visionClient.analyzeImage(filePath);
+            VisionResponse visionData = visionClient.analyzeImage(filePath,mediaId);
 
             Media media = mediaRepository.findById(mediaId).orElseThrow();
 

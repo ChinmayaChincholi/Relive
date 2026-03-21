@@ -63,3 +63,7 @@ build/
 # ======================
 .DS_Store
 Thumbs.db
+
+#FAISS files
+relive-ai-service/vector.index
+relive-ai-service/vector_ids.pkl
