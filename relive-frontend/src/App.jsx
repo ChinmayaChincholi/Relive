@@ -6,65 +6,30 @@ import Dashboard from "./pages/Dashboard";
 import Import from "./pages/Import";
 import Ask from "./pages/Ask";
 import Media from "./pages/Media";
+import Faces from "./pages/Faces";
 
-// Simple route protection
 function PrivateRoute({ children }) {
-  const token = localStorage.getItem("token");
-  return token ? children : <Navigate to="/" />;
+    const token = localStorage.getItem("token");
+    return token ? children : <Navigate to="/" />;
 }
 
 function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
+    return (
+        <BrowserRouter>
+            <Routes>
+                <Route path="/" element={<Login />} />
+                <Route path="/register" element={<Register />} />
 
-        {/* Public Routes */}
-        <Route path="/" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+                <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+                <Route path="/import" element={<PrivateRoute><Import /></PrivateRoute>} />
+                <Route path="/ask" element={<PrivateRoute><Ask /></PrivateRoute>} />
+                <Route path="/media" element={<PrivateRoute><Media /></PrivateRoute>} />
+                <Route path="/faces" element={<PrivateRoute><Faces /></PrivateRoute>} />
 
-        {/* Protected Routes */}
-        <Route
-          path="/dashboard"
-          element={
-            <PrivateRoute>
-              <Dashboard />
-            </PrivateRoute>
-          }
-        />
-
-        <Route
-          path="/import"
-          element={
-            <PrivateRoute>
-              <Import />
-            </PrivateRoute>
-          }
-        />
-
-        <Route
-          path="/ask"
-          element={
-            <PrivateRoute>
-              <Ask />
-            </PrivateRoute>
-          }
-        />
-
-        <Route
-          path="/media"
-          element={
-            <PrivateRoute>
-              <Media />
-            </PrivateRoute>
-          }
-        />
-
-        {/* Catch all */}
-        <Route path="*" element={<Navigate to="/" />} />
-
-      </Routes>
-    </BrowserRouter>
-  );
+                <Route path="*" element={<Navigate to="/" />} />
+            </Routes>
+        </BrowserRouter>
+    );
 }
 
 export default App;

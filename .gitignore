@@ -64,6 +64,21 @@ build/
 .DS_Store
 Thumbs.db
 
-#FAISS files
+# ======================
+# FAISS index files
+# ======================
 relive-ai-service/vector.index
 relive-ai-service/vector_ids.pkl
+
+# ======================
+# Face crops (generated at runtime)
+# ======================
+relive-ai-service/face_crops/
+
+# ======================
+# Model weights (auto-downloaded on first run)
+# Keep yolov8n-face-lindevs.pt since it needs manual download
+# ======================
+*.h5
+relive-ai-service/*.tflite
+relive-ai-service/yolov8n.pt

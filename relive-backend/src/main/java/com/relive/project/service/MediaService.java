@@ -29,11 +29,9 @@ public class MediaService {
     }
 
     public String uploadMultiple(List<MultipartFile> files, String email) throws IOException {
-
         for (MultipartFile file : files) {
             mediaUploadService.uploadMedia(file, email);
         }
-
         return files.size() + " files uploaded. Processing started.";
     }
 
@@ -56,9 +54,10 @@ public class MediaService {
         return mediaSearchService.searchByNaturalQuery(query, email);
     }
 
-    public String getStatus(Long id) {
+    public String getImagePath(Long id, String email) {
         return mediaRepository.findById(id)
-                .map(Media::getStatus)
-                .orElse("NOT FOUND");
+                .filter(m -> m.getUser().getEmail().equals(email))
+                .map(Media::getFilePath)
+                .orElse(null);
     }
 }

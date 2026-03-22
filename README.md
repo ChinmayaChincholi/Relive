@@ -18,8 +18,8 @@ The system combines computer vision, NLP, and semantic embeddings to enable inte
 - 🧠 CLIP-based semantic vector search using FAISS
 - 🖼️ Automatic image captioning using BLIP
 - 🏷️ Object extraction for keyword-based retrieval
-- 👤 Face detection (YOLO-based)
-- 📅 Metadata extraction (date, time, EXIF)
+- 👤 Face detection (YOLO-based) - Yet to do
+- 📅 Metadata extraction (date, time, EXIF) - Date is extracted, time and location yet to do
 - ⚡ Hybrid search (semantic + metadata + keyword matching)
 
 ---

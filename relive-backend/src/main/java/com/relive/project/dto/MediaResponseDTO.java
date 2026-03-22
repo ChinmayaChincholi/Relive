@@ -18,4 +18,7 @@ public class MediaResponseDTO {
 
     private LocalDateTime dateTaken;
 
+    private String location;
+
+    private String eventType;
 }

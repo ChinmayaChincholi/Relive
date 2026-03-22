@@ -15,6 +15,8 @@ public class MediaMapper {
         dto.setFaceCount(media.getFaceCount());
         dto.setStatus(media.getStatus());
         dto.setDateTaken(media.getDateTaken());
+        dto.setLocation(media.getLocation());
+        dto.setEventType(media.getEventType());
 
         return dto;
     }

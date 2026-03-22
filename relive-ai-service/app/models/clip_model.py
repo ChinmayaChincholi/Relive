@@ -1,19 +1,14 @@
 import torch
 from transformers import CLIPModel, CLIPProcessor
 from PIL import Image
+from app.config import CLIP_MODEL
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-print("Loading CLIP model...")
+print(f"Loading CLIP model ({CLIP_MODEL})...")
 
-clip_model = CLIPModel.from_pretrained(
-    "openai/clip-vit-base-patch32"
-)
-
-clip_processor = CLIPProcessor.from_pretrained(
-    "openai/clip-vit-base-patch32"
-)
-
+clip_model = CLIPModel.from_pretrained(CLIP_MODEL)
+clip_processor = CLIPProcessor.from_pretrained(CLIP_MODEL)
 clip_model.to(device)
 
 print("CLIP loaded.")
@@ -25,7 +20,6 @@ def normalize(features):
 
 def get_image_embedding(image):
 
-    # image is expected to be a PIL Image
     if not isinstance(image, Image.Image):
         raise ValueError("Expected PIL Image for embedding")
 

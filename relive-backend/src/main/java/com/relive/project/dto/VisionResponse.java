@@ -19,4 +19,7 @@ public class VisionResponse {
 
     @JsonProperty("date_taken")
     private String date_taken;
+
+    @JsonProperty("location")
+    private String location;
 }

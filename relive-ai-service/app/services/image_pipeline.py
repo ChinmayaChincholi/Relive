@@ -9,7 +9,8 @@ from app.models.yolo_model import detect_faces
 from app.utils.image_utils import (
     resize_image,
     detect_day_night,
-    extract_exif_date
+    extract_exif_date,
+    extract_exif_location
 )
 
 from app.utils.text_utils import normalize_object
@@ -34,7 +35,9 @@ def analyze_image(file_path, media_id):
 
     original_image = Image.open(file_path)
 
+    # Extract EXIF data BEFORE converting (conversion strips EXIF)
     exif_date = extract_exif_date(original_image)
+    exif_location = extract_exif_location(original_image)
 
     image = original_image.convert("RGB")
 
@@ -63,5 +66,6 @@ def analyze_image(file_path, media_id):
         "face_count": face_count,
         "time_of_day": time_of_day,
         "embedding": embedding,
-        "date_taken": exif_date
+        "date_taken": exif_date,
+        "location": exif_location
     }
