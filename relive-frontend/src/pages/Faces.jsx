@@ -1,207 +1,213 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getPeople, namePerson, getPhotosForPerson } from "../services/faceService";
-import { getImageUrl, getFaceCropUrl } from "../services/mediaService";
+import { useEffect, useState } from 'react';
+import AppLayout from '../components/AppLayout';
+import { getPeople, namePerson, getPhotosForPerson } from '../services/faceService';
+import { getImageUrl, getFaceCropUrl } from '../services/mediaService';
 
 export default function Faces() {
+  const [people, setPeople] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [nameInputs, setNameInputs] = useState({});
+  const [savingId, setSavingId] = useState(null);
+  const [selectedPerson, setSelectedPerson] = useState(null);
+  const [personPhotos, setPersonPhotos] = useState([]);
 
-    const [people, setPeople] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [nameInputs, setNameInputs] = useState({});
-    const [savingId, setSavingId] = useState(null);
-    const [selectedPerson, setSelectedPerson] = useState(null);
-    const [personPhotos, setPersonPhotos] = useState([]);
-    const navigate = useNavigate();
+  const fetchPeople = async () => {
+    try {
+      setLoading(true);
+      const data = await getPeople();
+      setPeople(data);
+    } catch {}
+    finally { setLoading(false); }
+  };
 
-    const fetchPeople = async () => {
-        try {
-            setLoading(true);
-            const data = await getPeople();
-            setPeople(data);
-        } catch (err) {
-            console.error("Error fetching people:", err);
-        } finally {
-            setLoading(false);
-        }
-    };
+  useEffect(() => { fetchPeople(); }, []);
 
-    useEffect(() => {
-        fetchPeople();
-    }, []);
+  const handleNameSubmit = async (personId) => {
+    const name = nameInputs[personId]?.trim();
+    if (!name) return;
+    try {
+      setSavingId(personId);
+      await namePerson(personId, name);
+      setPeople(prev => prev.map(p => p.personId === personId ? { ...p, name } : p));
+      setNameInputs(prev => ({ ...prev, [personId]: '' }));
+      if (selectedPerson?.personId === personId) setSelectedPerson(prev => ({ ...prev, name }));
+    } catch { alert('Failed to save name'); }
+    finally { setSavingId(null); }
+  };
 
-    const handleNameChange = (personId, value) => {
-        setNameInputs(prev => ({ ...prev, [personId]: value }));
-    };
+  const handlePersonClick = async (person) => {
+    if (selectedPerson?.personId === person.personId) {
+      setSelectedPerson(null); setPersonPhotos([]); return;
+    }
+    setSelectedPerson(person);
+    try {
+      const photos = await getPhotosForPerson(person.personId);
+      setPersonPhotos(photos);
+    } catch {}
+  };
 
-    const handleNameSubmit = async (personId) => {
-        const name = nameInputs[personId]?.trim();
-        if (!name) return;
-
-        try {
-            setSavingId(personId);
-            await namePerson(personId, name);
-
-            // Update the name locally without re-fetching/re-clustering
-            setPeople(prev => prev.map(p =>
-                p.personId === personId ? { ...p, name } : p
-            ));
-
-            // Clear the input after saving
-            setNameInputs(prev => ({ ...prev, [personId]: "" }));
-
-            // Update selected person if it's the one being named
-            if (selectedPerson?.personId === personId) {
-                setSelectedPerson(prev => ({ ...prev, name }));
-            }
-
-        } catch (err) {
-            alert("Failed to save name");
-        } finally {
-            setSavingId(null);
-        }
-    };
-
-    const handlePersonClick = async (person) => {
-        if (selectedPerson?.personId === person.personId) {
-            setSelectedPerson(null);
-            setPersonPhotos([]);
-            return;
-        }
-        setSelectedPerson(person);
-        try {
-            const photos = await getPhotosForPerson(person.personId);
-            setPersonPhotos(photos);
-        } catch (err) {
-            console.error("Error fetching person photos:", err);
-        }
-    };
-
-    return (
-        <div style={{ padding: 40 }}>
-
-            <h2>Your People</h2>
-            <p style={{ color: "#aaa" }}>
-                Faces detected across your photos are grouped here.
-                Click a group to see all photos. Name them to search by name.
-            </p>
-
-            <div style={{ marginBottom: 20 }}>
-                <button onClick={fetchPeople}>Refresh Groups</button>
+  return (
+    <AppLayout>
+      <div style={{ padding: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+          <div>
+            <div style={{ fontFamily: 'Syne, sans-serif', fontSize: '20px', fontWeight: '800', marginBottom: '2px' }}>
+              Your People
             </div>
-
-            {loading ? (
-                <p>Detecting and grouping faces...</p>
-            ) : people.length === 0 ? (
-                <p>No faces detected yet. Make sure your photos have finished processing.</p>
-            ) : (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 20 }}>
-                    {people.map((person) => (
-                        <div
-                            key={person.personId}
-                            style={{
-                                border: selectedPerson?.personId === person.personId
-                                    ? "2px solid #646cff"
-                                    : "1px solid #444",
-                                borderRadius: 12,
-                                padding: 15,
-                                width: 180,
-                                textAlign: "center",
-                            }}
-                        >
-                            <div
-                                onClick={() => handlePersonClick(person)}
-                                style={{ cursor: "pointer" }}
-                            >
-                                <img
-                                    src={getFaceCropUrl(person.representativeCrop)}
-                                    alt="face"
-                                    style={{
-                                        width: 100,
-                                        height: 100,
-                                        borderRadius: "50%",
-                                        objectFit: "cover",
-                                        display: "block",
-                                        margin: "0 auto 10px",
-                                    }}
-                                />
-                                <p style={{
-                                    margin: "4px 0",
-                                    fontWeight: "bold",
-                                    color: person.name ? "#fff" : "#aaa"
-                                }}>
-                                    {person.name || "Unknown"}
-                                </p>
-                                <p style={{ margin: 0, fontSize: 12, color: "#aaa" }}>
-                                    {person.mediaIds.length} photo{person.mediaIds.length !== 1 ? "s" : ""}
-                                </p>
-                            </div>
-
-                            <div
-                                style={{ marginTop: 10 }}
-                                onClick={(e) => e.stopPropagation()}
-                            >
-                                <input
-                                    type="text"
-                                    placeholder={person.name ? `Rename "${person.name}"` : "Add name..."}
-                                    value={nameInputs[person.personId] || ""}
-                                    onChange={(e) => handleNameChange(person.personId, e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter") handleNameSubmit(person.personId);
-                                    }}
-                                    style={{
-                                        width: "100%",
-                                        padding: "4px 6px",
-                                        fontSize: 13,
-                                        boxSizing: "border-box"
-                                    }}
-                                />
-                                <button
-                                    onClick={() => handleNameSubmit(person.personId)}
-                                    disabled={savingId === person.personId}
-                                    style={{
-                                        marginTop: 5,
-                                        width: "100%",
-                                        padding: "4px",
-                                        fontSize: 12
-                                    }}
-                                >
-                                    {savingId === person.personId ? "Saving..." : "Save Name"}
-                                </button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {selectedPerson && (
-                <div style={{ marginTop: 40 }}>
-                    <h3>
-                        Photos of {selectedPerson.name || "Unknown Person"}
-                        <span style={{ fontSize: 14, color: "#aaa", marginLeft: 10 }}>
-                            (click person again to close)
-                        </span>
-                    </h3>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                        {personPhotos.map((photo) => (
-                            <img
-                                key={photo.id}
-                                src={getImageUrl(photo.id)}
-                                alt={photo.fileName}
-                                style={{
-                                    width: 160,
-                                    height: 160,
-                                    objectFit: "cover",
-                                    borderRadius: 8,
-                                    border: "1px solid #444",
-                                }}
-                            />
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            <br />
-            <button onClick={() => navigate("/dashboard")}>Back to Dashboard</button>
+            <div style={{ fontSize: '12px', color: 'var(--text3)', fontWeight: '300' }}>
+              {people.length} people found across your photos. Name them to search by name.
+            </div>
+          </div>
+          <button
+            onClick={fetchPeople}
+            style={{
+              padding: '7px 14px', background: 'var(--surface)',
+              border: '1px solid var(--border)', borderRadius: '8px',
+              fontSize: '12px', color: 'var(--text2)', cursor: 'pointer',
+            }}
+          >Refresh</button>
         </div>
-    );
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text3)' }}>
+            Grouping faces across your photos...
+          </div>
+        ) : people.length === 0 ? (
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: '14px', padding: '60px 24px', textAlign: 'center',
+            color: 'var(--text3)', fontSize: '13px',
+          }}>
+            <div style={{ fontSize: '36px', marginBottom: '14px' }}>👥</div>
+            No faces detected yet. Make sure your photos have finished processing.
+          </div>
+        ) : (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+            gap: '12px',
+          }}>
+            {people.map(person => (
+              <div key={person.personId} style={{
+                background: 'var(--surface)',
+                border: `1px solid ${selectedPerson?.personId === person.personId
+                  ? 'rgba(245,158,11,0.5)'
+                  : person.name ? 'var(--border)' : 'rgba(245,158,11,0.18)'}`,
+                borderRadius: '14px',
+                padding: '16px 14px',
+                textAlign: 'center',
+                transition: 'border-color 0.2s',
+              }}>
+                {/* Face avatar */}
+                <div
+                  onClick={() => handlePersonClick(person)}
+                  style={{ cursor: 'pointer', marginBottom: '10px' }}
+                >
+                  <div style={{
+                    width: '72px', height: '72px', borderRadius: '50%',
+                    overflow: 'hidden',
+                    border: `2px solid ${person.name ? 'rgba(245,158,11,0.35)' : 'rgba(245,158,11,0.55)'}`,
+                    margin: '0 auto 8px',
+                    background: 'var(--surface2)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {person.representativeCrop ? (
+                      <img
+                        src={getFaceCropUrl(person.representativeCrop)}
+                        alt="face"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: '28px' }}>?</span>
+                    )}
+                  </div>
+                  <div style={{
+                    fontSize: '13px', fontWeight: '600',
+                    fontFamily: 'Syne, sans-serif',
+                    color: person.name ? 'var(--text)' : 'var(--text3)',
+                    marginBottom: '2px',
+                  }}>{person.name || 'Unknown'}</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text3)' }}>
+                    {person.mediaIds.length} photo{person.mediaIds.length !== 1 ? 's' : ''}
+                  </div>
+                </div>
+
+                {/* Name input */}
+                <div onClick={e => e.stopPropagation()}>
+                  <input
+                    type="text"
+                    placeholder={person.name ? `Rename "${person.name}"` : 'Add name...'}
+                    value={nameInputs[person.personId] || ''}
+                    onChange={e => setNameInputs(prev => ({ ...prev, [person.personId]: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && handleNameSubmit(person.personId)}
+                    style={{
+                      width: '100%', background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '7px', padding: '6px 8px',
+                      fontSize: '11px', color: 'var(--text2)', outline: 'none',
+                      marginBottom: '6px',
+                      transition: 'border-color 0.2s',
+                    }}
+                    onFocus={e => e.target.style.borderColor = 'rgba(245,158,11,0.4)'}
+                    onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                  />
+                  <button
+                    onClick={() => handleNameSubmit(person.personId)}
+                    disabled={savingId === person.personId}
+                    style={{
+                      width: '100%', padding: '6px',
+                      background: savingId === person.personId ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.1)',
+                      border: '1px solid rgba(245,158,11,0.2)',
+                      borderRadius: '7px', fontSize: '11px',
+                      color: '#f59e0b', cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                  >{savingId === person.personId ? 'Saving...' : 'Save Name'}</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Selected person photos */}
+        {selectedPerson && (
+          <div style={{ marginTop: '32px' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px',
+            }}>
+              <div style={{ fontFamily: 'Syne, sans-serif', fontSize: '16px', fontWeight: '700' }}>
+                Photos of {selectedPerson.name || 'Unknown Person'}
+              </div>
+              <button
+                onClick={() => { setSelectedPerson(null); setPersonPhotos([]); }}
+                style={{
+                  padding: '4px 10px', background: 'var(--surface)',
+                  border: '1px solid var(--border)', borderRadius: '6px',
+                  fontSize: '11px', color: 'var(--text3)', cursor: 'pointer',
+                }}
+              >Close ×</button>
+            </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+              gap: '8px',
+            }}>
+              {personPhotos.map(photo => (
+                <div key={photo.id} style={{
+                  height: '160px', borderRadius: '10px', overflow: 'hidden',
+                  border: '1px solid var(--border)',
+                }}>
+                  <img
+                    src={getImageUrl(photo.id)}
+                    alt={photo.fileName}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  );
 }
