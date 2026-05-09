@@ -1,19 +1,9 @@
 import axios from "axios";
 
+// All requests go to the local Spring Boot backend.
+// No auth headers — this is a local-only application.
 const api = axios.create({
-  baseURL: "http://localhost:8080"
-});
-
-api.interceptors.request.use((config) => {
-
-  const token = localStorage.getItem("token");
-
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-
-  return config;
-
+  baseURL: "http://localhost:8080",
 });
 
 export default api;

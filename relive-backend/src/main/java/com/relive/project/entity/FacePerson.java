@@ -16,9 +16,6 @@ public class FacePerson {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String name; // null until user names this person
-
-    @ManyToOne
-    @JoinColumn(name = "user_id")
-    private User user;
+    // Null until the user assigns a name to this person cluster.
+    private String name;
 }

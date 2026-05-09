@@ -1,6 +1,7 @@
 import os
 import uuid
 import numpy as np
+from pathlib import Path
 from PIL import Image
 from deepface import DeepFace
 from ultralytics import YOLO
@@ -12,13 +13,17 @@ from app.config import (
     MAX_IMAGE_DIMENSION
 )
 
-FACE_CROPS_DIR = "face_crops"
+# Write face crops to ~/.relive/face_crops/ so the Spring backend can serve them.
+# The backend resolves crop paths against ${relive.data.dir} = ~/.relive/.
+# Override with RELIVE_DATA_DIR env var if needed.
+RELIVE_DATA_DIR = os.environ.get("RELIVE_DATA_DIR", str(Path.home() / ".relive"))
+FACE_CROPS_DIR = os.path.join(RELIVE_DATA_DIR, "face_crops")
 os.makedirs(FACE_CROPS_DIR, exist_ok=True)
 
+print(f"Face crops will be saved to: {FACE_CROPS_DIR}")
 print(f"Loading YOLO face model ({YOLO_FACE_MODEL})...")
 yolo_face = YOLO(YOLO_FACE_MODEL)
 print("YOLO face model loaded.")
-
 
 def extract_faces_from_image(image_path: str):
 
@@ -108,11 +113,17 @@ def extract_faces_from_image(image_path: str):
 
         pil_crop_resized = pil_crop.resize((128, 128), Image.LANCZOS)
         crop_filename = f"{uuid.uuid4().hex}.jpg"
-        crop_path = os.path.join(FACE_CROPS_DIR, crop_filename)
-        pil_crop_resized.save(crop_path, "JPEG")
+
+        # Full absolute path for saving the file
+        crop_abs_path = os.path.join(FACE_CROPS_DIR, crop_filename)
+        pil_crop_resized.save(crop_abs_path, "JPEG")
+
+        # Relative path stored in DB: "face_crops/<filename>"
+        # The backend resolves this against ~/.relive/ → ~/.relive/face_crops/<filename>
+        crop_rel_path = os.path.join("face_crops", crop_filename)
 
         results_list.append({
-            "crop_path": crop_path,
+            "crop_path": crop_rel_path,
             "embedding": embedding,
             "confidence": confidence
         })

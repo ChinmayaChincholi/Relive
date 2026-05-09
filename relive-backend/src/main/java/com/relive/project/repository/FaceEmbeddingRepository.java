@@ -10,9 +10,9 @@ public interface FaceEmbeddingRepository extends JpaRepository<FaceEmbedding, Lo
 
     List<FaceEmbedding> findByMedia_Id(Long mediaId);
 
-    List<FaceEmbedding> findByMedia_User_Email(String email);
+    List<FaceEmbedding> findAll();
 
     List<FaceEmbedding> findByPerson(FacePerson person);
 
-    List<FaceEmbedding> findByPersonIsNullAndMedia_User_Email(String email);
+    List<FaceEmbedding> findByPersonIsNull();
 }

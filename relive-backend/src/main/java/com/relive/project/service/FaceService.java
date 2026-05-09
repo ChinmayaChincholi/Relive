@@ -4,7 +4,6 @@ import com.relive.project.client.FaceClient;
 import com.relive.project.dto.FacePersonDTO;
 import com.relive.project.entity.*;
 import com.relive.project.repository.*;
-
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,25 +19,20 @@ public class FaceService {
     private final FaceEmbeddingRepository faceEmbeddingRepository;
     private final FacePersonRepository facePersonRepository;
     private final MediaRepository mediaRepository;
-    private final UserRepository userRepository;
+
+    // ── Face extraction (called after each image is processed) ────────
 
     public void extractAndStoreFaces(Long mediaId, String absoluteImagePath) {
-
         try {
-
-            Map<String, Object> response =
-                    faceClient.extractFaces(absoluteImagePath, mediaId);
-
-            List<Map<String, Object>> faces =
-                    (List<Map<String, Object>>) response.get("faces");
+            Map<String, Object> response = faceClient.extractFaces(absoluteImagePath, mediaId);
+            List<Map<String, Object>> faces = (List<Map<String, Object>>) response.get("faces");
 
             if (faces == null || faces.isEmpty()) return;
 
             Media media = mediaRepository.findById(mediaId).orElseThrow();
 
             for (Map<String, Object> face : faces) {
-
-                String cropPath = (String) face.get("crop_path");
+                String cropPath       = (String) face.get("crop_path");
                 List<Double> embedding = (List<Double>) face.get("embedding");
                 Double confidence = face.get("confidence") != null
                         ? ((Number) face.get("confidence")).doubleValue()
@@ -60,154 +54,126 @@ public class FaceService {
 
                 faceEmbeddingRepository.save(fe);
             }
-
         } catch (Exception e) {
-            System.out.println("Face extraction failed for media "
-                    + mediaId + ": " + e.getMessage());
+            System.out.println("Face extraction failed for media " + mediaId + ": " + e.getMessage());
         }
     }
+
+    // ── Clustering ────────────────────────────────────────────────────
 
     /**
-     * Smart clustering — only runs when there are unassigned embeddings.
-     * Preserves all existing named persons.
-     * Assigns unassigned faces to existing persons or creates new ones.
+     * Smart incremental clustering.
+     *  - Only triggers when there are new unassigned embeddings.
+     *  - Clusters ALL embeddings together so new faces are compared against existing ones.
+     *  - Preserves names on existing FacePerson records.
+     *
+     * NOTE: Called by MediaProcessingService after each image finishes processing,
+     * NOT from the read path (getPeople). This keeps the Faces page fast.
      */
     @Transactional
-    public void clusterAndAssign(String email) {
+    public void clusterAndAssign() {
+        try {
+            List<FaceEmbedding> unassigned = faceEmbeddingRepository.findByPersonIsNull();
+            if (unassigned.isEmpty()) return; // nothing new — preserve existing state
 
-        User user = userRepository.findByEmail(email).orElseThrow();
+            List<FaceEmbedding> allEmbeddings = faceEmbeddingRepository.findAll();
+            if (allEmbeddings.isEmpty()) return;
 
-        // Only get UNASSIGNED embeddings — don't touch already-assigned ones
-        List<FaceEmbedding> unassigned =
-                faceEmbeddingRepository.findByPersonIsNullAndMedia_User_Email(email);
+            // Build embedding matrix for the clustering call
+            List<List<Double>> embeddingVectors = allEmbeddings.stream()
+                    .map(fe -> {
+                        String[] parts = fe.getEmbeddingCsv().split(",");
+                        List<Double> vec = new ArrayList<>();
+                        for (String p : parts) vec.add(Double.parseDouble(p));
+                        return vec;
+                    })
+                    .collect(Collectors.toList());
 
-        if (unassigned.isEmpty()) {
-            // Nothing new to cluster — return without touching existing persons
-            return;
-        }
+            List<Integer> labels = faceClient.clusterFaces(embeddingVectors);
 
-        // Get ALL embeddings to recluster everything together
-        // (new faces need to be compared against all existing faces)
-        List<FaceEmbedding> allEmbeddings =
-                faceEmbeddingRepository.findByMedia_User_Email(email);
+            if (labels == null || labels.size() != allEmbeddings.size()) {
+                System.out.println("Clustering returned unexpected label count. Skipping assignment.");
+                return;
+            }
 
-        if (allEmbeddings.isEmpty()) return;
+            // Group embeddings by cluster label (-1 = noise, skip)
+            Map<Integer, List<FaceEmbedding>> clusters = new HashMap<>();
+            for (int i = 0; i < labels.size(); i++) {
+                int label = labels.get(i);
+                if (label == -1) continue;
+                clusters.computeIfAbsent(label, k -> new ArrayList<>()).add(allEmbeddings.get(i));
+            }
 
-        // Build embedding vectors for clustering
-        List<List<Double>> embeddingVectors = allEmbeddings.stream()
-                .map(fe -> {
-                    String[] parts = fe.getEmbeddingCsv().split(",");
-                    List<Double> vec = new ArrayList<>();
-                    for (String p : parts) vec.add(Double.parseDouble(p));
-                    return vec;
-                })
-                .collect(Collectors.toList());
-
-        // Run clustering on ALL embeddings
-        List<Integer> labels = faceClient.clusterFaces(embeddingVectors);
-
-        // Group embeddings by cluster label
-        Map<Integer, List<FaceEmbedding>> clusters = new HashMap<>();
-        for (int i = 0; i < labels.size(); i++) {
-            int label = labels.get(i);
-            if (label == -1) continue; // noise
-            clusters.computeIfAbsent(label, k -> new ArrayList<>())
-                    .add(allEmbeddings.get(i));
-        }
-
-        // Get existing persons for this user (these have names we must preserve)
-        List<FacePerson> existingPersons =
-                facePersonRepository.findByUser_Email(email);
-
-        // Build a map of existing person → their embedding IDs
-        // so we can match new clusters to existing persons
-        Map<Long, Set<Long>> personToEmbeddingIds = new HashMap<>();
-        for (FacePerson person : existingPersons) {
-            List<FaceEmbedding> personEmbeddings =
-                    faceEmbeddingRepository.findByPerson(person);
-            Set<Long> ids = personEmbeddings.stream()
-                    .map(FaceEmbedding::getId)
-                    .collect(Collectors.toSet());
-            personToEmbeddingIds.put(person.getId(), ids);
-        }
-
-        // Match each new cluster to an existing person or create a new one
-        // Matching: if a cluster contains any embedding already assigned
-        // to an existing person, it belongs to that person
-        Map<Integer, FacePerson> clusterToExistingPerson = new HashMap<>();
-
-        for (Map.Entry<Integer, List<FaceEmbedding>> entry : clusters.entrySet()) {
-
-            int clusterLabel = entry.getKey();
-            List<FaceEmbedding> clusterEmbeddings = entry.getValue();
-
-            // Check if any embedding in this cluster is already assigned
-            for (FaceEmbedding fe : clusterEmbeddings) {
-                if (fe.getPerson() != null) {
-                    clusterToExistingPerson.put(clusterLabel, fe.getPerson());
-                    break;
+            // Match each cluster to an existing FacePerson if any embedding in the
+            // cluster is already assigned (preserves the existing name).
+            Map<Integer, FacePerson> clusterToExistingPerson = new HashMap<>();
+            for (Map.Entry<Integer, List<FaceEmbedding>> entry : clusters.entrySet()) {
+                for (FaceEmbedding fe : entry.getValue()) {
+                    if (fe.getPerson() != null) {
+                        clusterToExistingPerson.put(entry.getKey(), fe.getPerson());
+                        break;
+                    }
                 }
             }
-        }
 
-        // Now assign all embeddings to persons
-        for (Map.Entry<Integer, List<FaceEmbedding>> entry : clusters.entrySet()) {
+            // Assign embeddings to persons, creating new unnamed persons for new clusters
+            for (Map.Entry<Integer, List<FaceEmbedding>> entry : clusters.entrySet()) {
+                int clusterLabel = entry.getKey();
+                List<FaceEmbedding> clusterEmbeddings = entry.getValue();
 
-            int clusterLabel = entry.getKey();
-            List<FaceEmbedding> clusterEmbeddings = entry.getValue();
+                FacePerson person;
+                if (clusterToExistingPerson.containsKey(clusterLabel)) {
+                    person = clusterToExistingPerson.get(clusterLabel);
+                } else {
+                    person = FacePerson.builder().name(null).build();
+                    facePersonRepository.save(person);
+                }
 
-            FacePerson person;
-
-            if (clusterToExistingPerson.containsKey(clusterLabel)) {
-                // Use existing person — preserves their name
-                person = clusterToExistingPerson.get(clusterLabel);
-            } else {
-                // New cluster — create a new unnamed person
-                person = FacePerson.builder()
-                        .name(null)
-                        .user(user)
-                        .build();
-                facePersonRepository.save(person);
+                for (FaceEmbedding fe : clusterEmbeddings) {
+                    fe.setPerson(person);
+                    faceEmbeddingRepository.save(fe);
+                }
             }
 
-            // Assign all embeddings in this cluster to this person
-            for (FaceEmbedding fe : clusterEmbeddings) {
-                fe.setPerson(person);
-                faceEmbeddingRepository.save(fe);
+            // Remove any FacePerson records left with no embeddings after reclustering
+            List<FacePerson> allPersons = facePersonRepository.findAll();
+            for (FacePerson person : allPersons) {
+                if (faceEmbeddingRepository.findByPerson(person).isEmpty()) {
+                    facePersonRepository.delete(person);
+                }
             }
-        }
 
-        // Clean up any persons that ended up with no embeddings
-        // (can happen if clustering changed significantly)
-        for (FacePerson person : existingPersons) {
-            List<FaceEmbedding> remaining =
-                    faceEmbeddingRepository.findByPerson(person);
-            if (remaining.isEmpty()) {
-                facePersonRepository.delete(person);
-            }
+            System.out.println("Clustering complete. Clusters: " + clusters.size());
+
+        } catch (Exception e) {
+            System.out.println("Face clustering failed: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
-    public List<FacePersonDTO> getPeopleForUser(String email) {
+    // ── Queries ───────────────────────────────────────────────────────
 
-        // Only cluster if there are new unassigned embeddings
-        clusterAndAssign(email);
-
-        List<FacePerson> persons = facePersonRepository.findByUser_Email(email);
+    /**
+     * Returns the list of known persons. Does NOT trigger clustering —
+     * clustering happens in the background after each image is processed.
+     */
+    public List<FacePersonDTO> getPeople() {
+        // Do NOT call clusterAndAssign() here.
+        // Clustering is triggered by MediaProcessingService after processing completes.
+        List<FacePerson> persons = facePersonRepository.findAll();
         List<FacePersonDTO> result = new ArrayList<>();
 
         for (FacePerson person : persons) {
-
-            List<FaceEmbedding> embeddings =
-                    faceEmbeddingRepository.findByPerson(person);
-
+            List<FaceEmbedding> embeddings = faceEmbeddingRepository.findByPerson(person);
             if (embeddings.isEmpty()) continue;
 
             List<String> cropPaths = embeddings.stream()
+                    .filter(fe -> fe.getCropPath() != null)
                     .map(FaceEmbedding::getCropPath)
                     .collect(Collectors.toList());
 
             List<Long> mediaIds = embeddings.stream()
+                    .filter(fe -> fe.getMedia() != null)
                     .map(fe -> fe.getMedia().getId())
                     .distinct()
                     .collect(Collectors.toList());
@@ -220,67 +186,49 @@ public class FaceService {
             dto.setRepresentativeCrop(representativeCrop);
             dto.setCropPaths(cropPaths);
             dto.setMediaIds(mediaIds);
-
             result.add(dto);
         }
 
         return result;
     }
 
-    private String pickBestRepresentativeCrop(List<FaceEmbedding> embeddings) {
-
-        return embeddings.stream()
-                .filter(fe -> fe.getConfidence() != null)
-                .max(Comparator.comparingDouble(FaceEmbedding::getConfidence))
-                .map(FaceEmbedding::getCropPath)
-                .orElse(embeddings.get(0).getCropPath());
-    }
-
-    public void namePerson(Long personId, String name, String email) {
-
+    public void namePerson(Long personId, String name) {
         FacePerson person = facePersonRepository.findById(personId)
                 .orElseThrow(() -> new RuntimeException("Person not found"));
-
-        if (!person.getUser().getEmail().equals(email)) {
-            throw new RuntimeException("Unauthorized");
-        }
-
         person.setName(name);
         facePersonRepository.save(person);
     }
 
-    public List<Long> getMediaIdsForPersonName(String name, String email) {
-
-        List<FacePerson> persons =
-                facePersonRepository.findByNameAndUser_Email(name, email);
-
+    public List<Long> getMediaIdsForPersonName(String name) {
+        List<FacePerson> persons = facePersonRepository.findByName(name);
         if (persons.isEmpty()) return Collections.emptyList();
 
-        // Collect media IDs from ALL persons with this name
-        // Handles case where same person is named identically across multiple clusters
         return persons.stream()
-                .flatMap(person ->
-                        faceEmbeddingRepository.findByPerson(person).stream()
-                )
+                .flatMap(person -> faceEmbeddingRepository.findByPerson(person).stream())
                 .map(fe -> fe.getMedia().getId())
                 .distinct()
                 .collect(Collectors.toList());
     }
 
-    public List<Media> getPhotosForPerson(Long personId, String email) {
-
+    public List<Media> getPhotosForPerson(Long personId) {
         FacePerson person = facePersonRepository.findById(personId)
                 .orElseThrow(() -> new RuntimeException("Person not found"));
 
-        if (!person.getUser().getEmail().equals(email)) {
-            throw new RuntimeException("Unauthorized");
-        }
-
-        return faceEmbeddingRepository.findByPerson(person)
-                .stream()
+        return faceEmbeddingRepository.findByPerson(person).stream()
+                .filter(fe -> fe.getMedia() != null)
                 .map(FaceEmbedding::getMedia)
                 .distinct()
                 .filter(m -> "COMPLETED".equals(m.getStatus()))
                 .collect(Collectors.toList());
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────
+
+    private String pickBestRepresentativeCrop(List<FaceEmbedding> embeddings) {
+        return embeddings.stream()
+                .filter(fe -> fe.getConfidence() != null)
+                .max(Comparator.comparingDouble(FaceEmbedding::getConfidence))
+                .map(FaceEmbedding::getCropPath)
+                .orElse(embeddings.get(0).getCropPath());
     }
 }

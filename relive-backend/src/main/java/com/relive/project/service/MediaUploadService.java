@@ -1,22 +1,18 @@
 package com.relive.project.service;
 
 import com.relive.project.entity.Media;
-import com.relive.project.entity.User;
 import com.relive.project.repository.MediaRepository;
-import com.relive.project.repository.UserRepository;
-
 import lombok.RequiredArgsConstructor;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.security.MessageDigest;
-import java.util.Base64;
-import java.util.Optional;
 import java.io.File;
 import java.io.IOException;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.Base64;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -24,108 +20,74 @@ import java.util.UUID;
 public class MediaUploadService {
 
     private final MediaRepository mediaRepository;
-    private final UserRepository userRepository;
     private final MediaProcessingService mediaProcessingService;
 
     @Value("${media.upload.path}")
     private String uploadDir;
 
-    public String uploadMedia(MultipartFile file, String email) throws IOException {
-
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
+    public String uploadMedia(MultipartFile file) throws IOException {
         try {
-
             String fileHash = calculateFileHash(file);
 
-            Optional<Media> existingMedia =
-                    mediaRepository.findByFileHashAndUser_Email(fileHash, email);
-
-            if (existingMedia.isPresent()) {
+            // Deduplication: skip if this exact file is already in the library.
+            Optional<Media> existing = mediaRepository.findByFileHash(fileHash);
+            if (existing.isPresent()) {
                 return "File already exists. Skipping reprocessing.";
             }
 
-            // Absolute storage root
-            String absoluteUploadRoot =
-                    System.getProperty("user.dir") + "/" + uploadDir;
-
-            // Relative path (stored in DB)
-            String relativeUserFolder =
-                    uploadDir + "/" + user.getId();
-
-            // Absolute path (used for writing file)
-            String absoluteUserFolder =
-                    absoluteUploadRoot + "/" + user.getId();
-
-            File directory = new File(absoluteUserFolder);
-
+            // Ensure uploads directory exists (also guaranteed at startup, but belt-and-suspenders).
+            File directory = new File(uploadDir);
             if (!directory.exists()) {
                 directory.mkdirs();
             }
 
             String originalName = file.getOriginalFilename();
-
             String extension = "";
-
             if (originalName != null && originalName.contains(".")) {
                 extension = originalName.substring(originalName.lastIndexOf("."));
             }
 
             String uniqueFileName = UUID.randomUUID() + extension;
 
-            String relativePath =
-                    relativeUserFolder + "/" + uniqueFileName;
-
-            String absolutePath =
-                    absoluteUserFolder + "/" + uniqueFileName;
+            // Store as absolute path so it is stable regardless of working directory.
+            String absolutePath = directory.getAbsolutePath() + File.separator + uniqueFileName;
 
             File destination = new File(absolutePath);
-
             file.transferTo(destination);
 
-            String mediaType = file.getContentType().startsWith("image")
+            String mediaType = (file.getContentType() != null && file.getContentType().startsWith("image"))
                     ? "IMAGE"
                     : "VIDEO";
 
             Media media = Media.builder()
                     .fileName(originalName)
-                    .filePath(relativePath) // STORE RELATIVE PATH
+                    .filePath(absolutePath)
                     .mediaType(mediaType)
                     .uploadedAt(LocalDateTime.now())
                     .status("PROCESSING")
                     .fileHash(fileHash)
-                    .user(user)
                     .build();
 
             mediaRepository.save(media);
 
+            // Dispatch to single-threaded async executor queue.
             mediaProcessingService.processMedia(media.getId(), absolutePath);
 
             return "File uploaded. Processing started.";
 
         } catch (Exception e) {
-
             e.printStackTrace();
-
-            return "Error processing file.";
+            return "Error processing file: " + e.getMessage();
         }
     }
 
     private String calculateFileHash(MultipartFile file) {
-
         try {
-
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-
             byte[] hash = digest.digest(file.getBytes());
-
             return Base64.getEncoder().encodeToString(hash);
-
         } catch (Exception e) {
-
             throw new RuntimeException("Error calculating file hash", e);
-
         }
     }
 }

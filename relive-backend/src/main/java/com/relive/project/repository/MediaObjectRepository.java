@@ -11,10 +11,7 @@ public interface MediaObjectRepository extends JpaRepository<MediaObject, Long> 
 
     List<MediaObject> findByObjectName(String objectName);
 
-    List<MediaObject> findByObjectNameContainingIgnoreCaseAndMedia_User_Email(
-            String objectName,
-            String email
-    );
+    List<MediaObject> findByObjectNameContainingIgnoreCase(String objectName);
 
     @Modifying
     void deleteByMedia(Media media);

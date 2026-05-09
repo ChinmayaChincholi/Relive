@@ -5,12 +5,10 @@ import com.relive.project.dto.FacePersonDTO;
 import com.relive.project.dto.MediaResponseDTO;
 import com.relive.project.mapper.MediaMapper;
 import com.relive.project.service.FaceService;
-
 import lombok.RequiredArgsConstructor;
-
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -27,60 +25,49 @@ public class FaceController {
 
     private final FaceService faceService;
 
+    @Value("${relive.data.dir}")
+    private String dataDir;
+
     @GetMapping("/people")
-    public ApiResponse<List<FacePersonDTO>> getPeople(Authentication auth) {
-
-        String email = auth.getName();
-
-        List<FacePersonDTO> people = faceService.getPeopleForUser(email);
-
+    public ApiResponse<List<FacePersonDTO>> getPeople() {
+        List<FacePersonDTO> people = faceService.getPeople();
         return new ApiResponse<>(true, "People fetched", people);
     }
 
     @PostMapping("/name/{personId}")
     public ApiResponse<String> namePerson(
             @PathVariable Long personId,
-            @RequestBody Map<String, String> body,
-            Authentication auth
+            @RequestBody Map<String, String> body
     ) {
-
-        String email = auth.getName();
         String name = body.get("name");
-
-        faceService.namePerson(personId, name, email);
-
+        faceService.namePerson(personId, name);
         return new ApiResponse<>(true, "Person named successfully", null);
     }
 
     @GetMapping("/person/{personId}/photos")
     public ApiResponse<List<MediaResponseDTO>> getPhotosForPerson(
-            @PathVariable Long personId,
-            Authentication auth
+            @PathVariable Long personId
     ) {
-
-        String email = auth.getName();
-
-        List<MediaResponseDTO> photos = faceService.getPhotosForPerson(personId, email)
+        List<MediaResponseDTO> photos = faceService.getPhotosForPerson(personId)
                 .stream()
                 .map(MediaMapper::toDTO)
                 .toList();
-
         return new ApiResponse<>(true, "Photos fetched", photos);
     }
 
-    // Serves face crop thumbnails securely
+    /**
+     * Serves face crop thumbnail images.
+     *
+     * The AI service writes crop files under its own working directory.
+     * The stored crop path is relative to the Relive data dir (e.g.
+     * "face_crops/crop_123.jpg"). We resolve it against ${relive.data.dir}.
+     *
+     * If the crop path is already absolute, Paths.get(dataDir, path) still
+     * works correctly because Paths.get resolves the last absolute segment.
+     */
     @GetMapping("/crop")
-    public ResponseEntity<byte[]> getCrop(
-            @RequestParam String path,
-            Authentication auth
-    ) throws IOException {
-
-        // Resolve relative to the AI service working directory
-        // face_crops folder is inside relive-ai-service/
-        String aiServiceDir = System.getProperty("user.dir")
-                .replace("relive-backend", "relive-ai-service");
-
-        Path filePath = Paths.get(aiServiceDir, path);
+    public ResponseEntity<byte[]> getCrop(@RequestParam String path) throws IOException {
+        Path filePath = Paths.get(dataDir, path);
 
         if (!Files.exists(filePath)) {
             System.out.println("Crop not found at: " + filePath.toAbsolutePath());
@@ -88,7 +75,6 @@ public class FaceController {
         }
 
         byte[] imageBytes = Files.readAllBytes(filePath);
-
         return ResponseEntity.ok()
                 .contentType(MediaType.IMAGE_JPEG)
                 .body(imageBytes);

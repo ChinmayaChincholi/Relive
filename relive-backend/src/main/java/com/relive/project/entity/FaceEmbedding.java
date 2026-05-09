@@ -18,8 +18,8 @@ public class FaceEmbedding {
 
     private String cropPath;
 
-    // Facenet512 produces 512-dim embeddings
-    // 512 floats × ~22 chars each = ~11,264 chars, use 30000 to be safe
+    // Face embedding stored as CSV of floats.
+    // 512-dim × ~22 chars each ≈ 11,264 chars; 30000 gives comfortable headroom.
     @Column(length = 30000)
     private String embeddingCsv;
 
@@ -29,6 +29,7 @@ public class FaceEmbedding {
     @JoinColumn(name = "media_id")
     private Media media;
 
+    // Null until clustering assigns this face to a FacePerson.
     @ManyToOne
     @JoinColumn(name = "person_id")
     private FacePerson person;

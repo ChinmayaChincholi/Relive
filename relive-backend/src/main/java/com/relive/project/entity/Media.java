@@ -2,6 +2,7 @@ package com.relive.project.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.time.LocalDateTime;
 
 @Entity
@@ -19,9 +20,11 @@ public class Media {
 
     private String fileName;
 
+    // Absolute path to the stored file on disk.
+    // Stored as absolute so it works regardless of working directory.
     private String filePath;
 
-    private String mediaType; // IMAGE or VIDEO
+    private String mediaType; // "IMAGE" or "VIDEO"
 
     private LocalDateTime uploadedAt;
 
@@ -33,18 +36,14 @@ public class Media {
     private Integer faceCount;
 
     @Column(nullable = false)
-    private String status;
+    private String status; // PROCESSING | COMPLETED | FAILED
 
     @Column(nullable = false)
-    private String fileHash;
+    private String fileHash; // SHA-256 of file bytes — deduplication guard
 
-    // Full datetime from EXIF (date + time)
+    // Full datetime from EXIF
     private LocalDateTime dateTaken;
 
-    // GPS coordinates as "lat,lon" string e.g. "12.9716,77.5946"
+    // Human-readable location string from reverse geocoding, e.g. "Bengaluru, Karnataka, India"
     private String location;
-
-    @ManyToOne
-    @JoinColumn(name = "user_id")
-    private User user;
 }

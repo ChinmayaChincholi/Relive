@@ -49,7 +49,27 @@ public class FaceClient {
 
         ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
 
-        List<Integer> labels = (List<Integer>) response.getBody().get("labels");
+        Map responseBody = response.getBody();
+        if (responseBody == null) {
+            System.out.println("cluster_faces returned null body");
+            return Collections.emptyList();
+        }
+
+        Object raw = responseBody.get("labels");
+        if (raw == null) {
+            System.out.println("cluster_faces response missing 'labels' key");
+            return Collections.emptyList();
+        }
+
+        // Jackson deserializes JSON integers as Integer when using raw Map,
+        // but the list elements come back as Object — cast each one individually.
+        List<?> rawList = (List<?>) raw;
+        List<Integer> labels = new ArrayList<>(rawList.size());
+        for (Object item : rawList) {
+            if (item instanceof Number) {
+                labels.add(((Number) item).intValue());
+            }
+        }
 
         return labels;
     }

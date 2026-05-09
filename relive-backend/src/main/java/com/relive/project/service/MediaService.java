@@ -2,9 +2,7 @@ package com.relive.project.service;
 
 import com.relive.project.entity.Media;
 import com.relive.project.repository.MediaRepository;
-
 import lombok.RequiredArgsConstructor;
-
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -20,43 +18,44 @@ public class MediaService {
     private final MediaSearchService mediaSearchService;
     private final MediaRepository mediaRepository;
 
-    public String uploadMedia(MultipartFile file, String email) throws IOException {
-        return mediaUploadService.uploadMedia(file, email);
+    public String uploadMedia(MultipartFile file) throws IOException {
+        return mediaUploadService.uploadMedia(file);
     }
 
-    public List<Media> getUserMedia(String email) {
-        return mediaRepository.findByUser_Email(email);
+    public List<Media> getAllMedia() {
+        return mediaRepository.findAll();
     }
 
-    public String uploadMultiple(List<MultipartFile> files, String email) throws IOException {
+    public String uploadMultiple(List<MultipartFile> files) throws IOException {
         for (MultipartFile file : files) {
-            mediaUploadService.uploadMedia(file, email);
+            mediaUploadService.uploadMedia(file);
         }
         return files.size() + " files uploaded. Processing started.";
     }
 
-    public Map<String, Long> getProgress(String email) {
-
-        long total = mediaRepository.countByUser_Email(email);
-        long processing = mediaRepository.countByUser_EmailAndStatus(email, "PROCESSING");
-        long completed = mediaRepository.countByUser_EmailAndStatus(email, "COMPLETED");
-        long failed = mediaRepository.countByUser_EmailAndStatus(email, "FAILED");
-
+    public Map<String, Long> getProgress() {
+        long total      = mediaRepository.count();
+        long processing = mediaRepository.countByStatus("PROCESSING");
+        long completed  = mediaRepository.countByStatus("COMPLETED");
+        long failed     = mediaRepository.countByStatus("FAILED");
         return Map.of(
-                "total", total,
+                "total",      total,
                 "processing", processing,
-                "completed", completed,
-                "failed", failed
+                "completed",  completed,
+                "failed",     failed
         );
     }
 
-    public List<Media> searchByNaturalQuery(String query, String email) {
-        return mediaSearchService.searchByNaturalQuery(query, email);
+    public List<Media> searchByNaturalQuery(String query) {
+        return mediaSearchService.searchByNaturalQuery(query);
     }
 
-    public String getImagePath(Long id, String email) {
+    /**
+     * Returns the absolute file path for a given media ID.
+     * Returns null if the media does not exist.
+     */
+    public String getImagePath(Long id) {
         return mediaRepository.findById(id)
-                .filter(m -> m.getUser().getEmail().equals(email))
                 .map(Media::getFilePath)
                 .orElse(null);
     }

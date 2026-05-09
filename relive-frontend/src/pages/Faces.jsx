@@ -6,6 +6,7 @@ import { getImageUrl, getFaceCropUrl } from '../services/mediaService';
 export default function Faces() {
   const [people, setPeople] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [nameInputs, setNameInputs] = useState({});
   const [savingId, setSavingId] = useState(null);
   const [selectedPerson, setSelectedPerson] = useState(null);
@@ -14,10 +15,15 @@ export default function Faces() {
   const fetchPeople = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await getPeople();
       setPeople(data);
-    } catch {}
-    finally { setLoading(false); }
+    } catch (e) {
+      console.error('Failed to load people:', e);
+      setError('Could not load faces. Make sure all three services are running and photos have finished processing.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchPeople(); }, []);
@@ -31,8 +37,11 @@ export default function Faces() {
       setPeople(prev => prev.map(p => p.personId === personId ? { ...p, name } : p));
       setNameInputs(prev => ({ ...prev, [personId]: '' }));
       if (selectedPerson?.personId === personId) setSelectedPerson(prev => ({ ...prev, name }));
-    } catch { alert('Failed to save name'); }
-    finally { setSavingId(null); }
+    } catch {
+      alert('Failed to save name');
+    } finally {
+      setSavingId(null);
+    }
   };
 
   const handlePersonClick = async (person) => {
@@ -43,7 +52,9 @@ export default function Faces() {
     try {
       const photos = await getPhotosForPerson(person.personId);
       setPersonPhotos(photos);
-    } catch {}
+    } catch (e) {
+      console.error('Failed to load photos for person:', e);
+    }
   };
 
   return (
@@ -70,7 +81,16 @@ export default function Faces() {
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text3)' }}>
-            Grouping faces across your photos...
+            Loading faces...
+          </div>
+        ) : error ? (
+          <div style={{
+            background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)',
+            borderRadius: '14px', padding: '40px 24px', textAlign: 'center',
+            color: '#f87171', fontSize: '13px',
+          }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>⚠️</div>
+            {error}
           </div>
         ) : people.length === 0 ? (
           <div style={{
@@ -116,6 +136,7 @@ export default function Faces() {
                         src={getFaceCropUrl(person.representativeCrop)}
                         alt="face"
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={e => { e.target.style.display = 'none'; }}
                       />
                     ) : (
                       <span style={{ fontSize: '28px' }}>?</span>

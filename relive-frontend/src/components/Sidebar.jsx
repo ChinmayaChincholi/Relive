@@ -5,11 +5,6 @@ export default function Sidebar() {
   const location = useLocation();
   const path = location.pathname;
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    navigate('/');
-  };
-
   const navItem = (icon, label, route) => {
     const active = path === route;
     return (
@@ -49,6 +44,7 @@ export default function Sidebar() {
       position: 'sticky',
       top: 0,
     }}>
+
       {/* Logo */}
       <div style={{
         display: 'flex',
@@ -112,22 +108,6 @@ export default function Sidebar() {
         {navItem('👥', 'Your People', '/faces')}
       </div>
 
-      {/* Bottom */}
-      <div style={{ borderTop: '1px solid var(--border)', paddingBottom: '8px' }}>
-        <div
-          onClick={handleLogout}
-          style={{
-            display: 'flex', alignItems: 'center', gap: '10px',
-            padding: '9px 14px', fontSize: '13px', color: '#475569',
-            cursor: 'pointer', transition: 'color 0.15s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.color = '#94a3b8'}
-          onMouseLeave={e => e.currentTarget.style.color = '#475569'}
-        >
-          <span style={{ fontSize: '15px', width: '20px', textAlign: 'center' }}>🚪</span>
-          Log out
-        </div>
-      </div>
     </div>
   );
 }

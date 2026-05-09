@@ -6,9 +6,7 @@ import com.relive.project.entity.Media;
 import com.relive.project.entity.MediaObject;
 import com.relive.project.repository.MediaObjectRepository;
 import com.relive.project.repository.MediaRepository;
-
 import lombok.RequiredArgsConstructor;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
@@ -28,28 +26,29 @@ public class MediaProcessingService {
     private final VisionClient visionClient;
     private final FaceService faceService;
 
-    // Self-injection to ensure @Transactional proxy is used when calling analyzeAndSave
+    // Self-injection so @Transactional proxy is in the call chain when
+    // analyzeAndSave is invoked from the async method.
     @Lazy
     @Autowired
     private MediaProcessingService self;
 
     @Async("taskExecutor")
     public void processMedia(Long mediaId, String filePath) {
-
-        // Call via self to go through Spring proxy so @Transactional works
         boolean success = self.analyzeAndSave(mediaId, filePath);
-
         if (success) {
             faceService.extractAndStoreFaces(mediaId, filePath);
             System.out.println("Face extraction done for media ID: " + mediaId);
+
+            // Cluster faces after every image so "Your People" stays up to date.
+            // clusterAndAssign() is a no-op if there are no new (unassigned) embeddings.
+            faceService.clusterAndAssign();
+            System.out.println("Face clustering done for media ID: " + mediaId);
         }
     }
 
     @Transactional
     public boolean analyzeAndSave(Long mediaId, String filePath) {
-
         try {
-
             System.out.println("Processing media ID: " + mediaId);
 
             VisionResponse visionData = visionClient.analyzeImage(filePath, mediaId);
@@ -58,12 +57,12 @@ public class MediaProcessingService {
 
             if (visionData.getDate_taken() != null) {
                 try {
-                    DateTimeFormatter formatter =
-                            DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss");
-                    LocalDateTime dateTaken =
-                            LocalDateTime.parse(visionData.getDate_taken(), formatter);
+                    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss");
+                    LocalDateTime dateTaken = LocalDateTime.parse(visionData.getDate_taken(), formatter);
                     media.setDateTaken(dateTaken);
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                    // EXIF date format varies; silently skip unparseable values.
+                }
             }
 
             if (visionData.getLocation() != null) {
@@ -74,10 +73,10 @@ public class MediaProcessingService {
             media.setFaceCount(visionData.getFace_count());
             media.setEventType(visionData.getTime_of_day());
 
+            // Replace any previous object tags for this media item.
             mediaObjectRepository.deleteByMedia(media);
 
             List<String> objects = visionData.getSemantic_objects();
-
             if (objects != null) {
                 for (String obj : objects) {
                     MediaObject mediaObject = MediaObject.builder()
@@ -92,19 +91,15 @@ public class MediaProcessingService {
             mediaRepository.save(media);
 
             System.out.println("Completed media ID: " + mediaId);
-
             return true;
 
         } catch (Exception e) {
-
             System.out.println("ERROR processing media ID: " + mediaId);
             e.printStackTrace();
-
             mediaRepository.findById(mediaId).ifPresent(m -> {
                 m.setStatus("FAILED");
                 mediaRepository.save(m);
             });
-
             return false;
         }
     }

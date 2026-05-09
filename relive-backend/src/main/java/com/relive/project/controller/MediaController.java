@@ -4,12 +4,9 @@ import com.relive.project.dto.ApiResponse;
 import com.relive.project.dto.MediaResponseDTO;
 import com.relive.project.mapper.MediaMapper;
 import com.relive.project.service.MediaService;
-
 import lombok.RequiredArgsConstructor;
-
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -29,89 +26,62 @@ public class MediaController {
 
     @PostMapping("/upload")
     public ApiResponse<String> upload(
-            @RequestParam("file") MultipartFile file,
-            Authentication auth
+            @RequestParam("file") MultipartFile file
     ) throws Exception {
-
-        String email = auth.getName();
-        String message = mediaService.uploadMedia(file, email);
-
+        String message = mediaService.uploadMedia(file);
         return new ApiResponse<>(true, message, null);
     }
 
     @PostMapping("/upload-folder")
     public ApiResponse<String> uploadFolder(
-            @RequestParam("files") List<MultipartFile> files,
-            Authentication auth
+            @RequestParam("files") List<MultipartFile> files
     ) throws Exception {
-
-        String email = auth.getName();
-        String message = mediaService.uploadMultiple(files, email);
-
+        String message = mediaService.uploadMultiple(files);
         return new ApiResponse<>(true, message, null);
     }
 
     @GetMapping("/my")
-    public ApiResponse<List<MediaResponseDTO>> getMyMedia(Authentication auth) {
-
-        String email = auth.getName();
-
-        List<MediaResponseDTO> media = mediaService.getUserMedia(email)
+    public ApiResponse<List<MediaResponseDTO>> getMyMedia() {
+        List<MediaResponseDTO> media = mediaService.getAllMedia()
                 .stream()
                 .map(MediaMapper::toDTO)
                 .toList();
-
         return new ApiResponse<>(true, "Media fetched successfully", media);
     }
 
     @GetMapping("/search-natural")
     public ApiResponse<List<MediaResponseDTO>> searchNatural(
-            @RequestParam String query,
-            Authentication auth
+            @RequestParam String query
     ) {
-
-        String email = auth.getName();
-
-        List<MediaResponseDTO> results = mediaService.searchByNaturalQuery(query, email)
+        List<MediaResponseDTO> results = mediaService.searchByNaturalQuery(query)
                 .stream()
                 .map(MediaMapper::toDTO)
                 .toList();
-
         return new ApiResponse<>(true, "Search completed", results);
     }
 
     @GetMapping("/progress")
-    public ApiResponse<Map<String, Long>> getProgress(Authentication auth) {
-
-        String email = auth.getName();
-
-        return new ApiResponse<>(true, "Progress fetched", mediaService.getProgress(email));
+    public ApiResponse<Map<String, Long>> getProgress() {
+        return new ApiResponse<>(true, "Progress fetched", mediaService.getProgress());
     }
 
-    // Serves the actual image file securely (JWT protected)
+    /**
+     * Serves the raw image bytes for a given media ID.
+     * The stored path is absolute, so no path reconstruction is needed.
+     */
     @GetMapping("/image/{id}")
-    public ResponseEntity<byte[]> getImage(
-            @PathVariable Long id,
-            Authentication auth
-    ) throws IOException {
-
-        String email = auth.getName();
-
-        String relativePath = mediaService.getImagePath(id, email);
-
-        if (relativePath == null) {
+    public ResponseEntity<byte[]> getImage(@PathVariable Long id) throws IOException {
+        String absolutePath = mediaService.getImagePath(id);
+        if (absolutePath == null) {
             return ResponseEntity.notFound().build();
         }
 
-        String absolutePath = System.getProperty("user.dir") + "/" + relativePath;
         Path filePath = Paths.get(absolutePath);
-
         if (!Files.exists(filePath)) {
             return ResponseEntity.notFound().build();
         }
 
         byte[] imageBytes = Files.readAllBytes(filePath);
-
         String contentType = Files.probeContentType(filePath);
         if (contentType == null) contentType = "image/jpeg";
 
@@ -119,5 +89,4 @@ public class MediaController {
                 .contentType(MediaType.parseMediaType(contentType))
                 .body(imageBytes);
     }
-
 }

@@ -13,20 +13,15 @@ public class AsyncConfig {
 
     @Bean(name = "taskExecutor")
     public Executor taskExecutor() {
-
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-
-        // Process one photo at a time to prevent AI service overload
-        // BLIP + CLIP + DeepFace cannot handle concurrent requests reliably
+        // Process one photo at a time to prevent AI service overload.
+        // BLIP + CLIP + YOLO cannot handle concurrent requests reliably.
         executor.setCorePoolSize(1);
         executor.setMaxPoolSize(1);
-
-        // Queue up to 500 photos waiting to be processed
+        // Queue up to 500 photos waiting to be processed.
         executor.setQueueCapacity(500);
-
         executor.setThreadNamePrefix("media-processing-");
         executor.initialize();
-
         return executor;
     }
 }
