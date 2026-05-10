@@ -1,13 +1,18 @@
 <!doctype html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>relive-frontend</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+    <title>Relive</title>
+    <!--
+      No external CDN links — everything loads from local npm packages.
+      Fonts:  @fontsource/syne + @fontsource/dm-sans  (imported in index.css)
+      Map:    react-simple-maps + world-atlas          (imported in MapPage.jsx)
+    -->
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/main.jsx"></script>
+</body>
 </html>

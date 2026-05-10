@@ -154,12 +154,10 @@ public class FaceService {
     // ── Queries ───────────────────────────────────────────────────────
 
     /**
-     * Returns the list of known persons. Does NOT trigger clustering —
-     * clustering happens in the background after each image is processed.
+     * Returns the list of known persons sorted by number of photos (descending).
+     * Does NOT trigger clustering — clustering happens in the background after each image is processed.
      */
     public List<FacePersonDTO> getPeople() {
-        // Do NOT call clusterAndAssign() here.
-        // Clustering is triggered by MediaProcessingService after processing completes.
         List<FacePerson> persons = facePersonRepository.findAll();
         List<FacePersonDTO> result = new ArrayList<>();
 
@@ -189,6 +187,9 @@ public class FaceService {
             result.add(dto);
         }
 
+        // Sort by photo count descending
+        result.sort((a, b) -> Integer.compare(b.getMediaIds().size(), a.getMediaIds().size()));
+
         return result;
     }
 
@@ -199,12 +200,65 @@ public class FaceService {
         facePersonRepository.save(person);
     }
 
+    /**
+     * Merge two face groups into one. All embeddings from person2 are reassigned to person1.
+     * Person1 gets the provided name (or falls back to existing names).
+     * Person2 is deleted.
+     */
+    @Transactional
+    public void mergePeople(Long personId1, Long personId2, String overrideName) {
+        FacePerson person1 = facePersonRepository.findById(personId1)
+                .orElseThrow(() -> new RuntimeException("Person " + personId1 + " not found"));
+        FacePerson person2 = facePersonRepository.findById(personId2)
+                .orElseThrow(() -> new RuntimeException("Person " + personId2 + " not found"));
+
+        // Determine final name
+        String finalName = overrideName != null && !overrideName.isBlank()
+                ? overrideName
+                : (person1.getName() != null ? person1.getName() : person2.getName());
+
+        person1.setName(finalName);
+        facePersonRepository.save(person1);
+
+        // Reassign all embeddings from person2 to person1
+        List<FaceEmbedding> embeddings2 = faceEmbeddingRepository.findByPerson(person2);
+        for (FaceEmbedding fe : embeddings2) {
+            fe.setPerson(person1);
+            faceEmbeddingRepository.save(fe);
+        }
+
+        // Delete person2
+        facePersonRepository.delete(person2);
+
+        System.out.println("Merged person " + personId2 + " into " + personId1 + " as '" + finalName + "'");
+    }
+
+    /**
+     * Delete a face person group and all its embeddings.
+     */
+    @Transactional
+    public void deletePerson(Long personId) {
+        FacePerson person = facePersonRepository.findById(personId)
+                .orElseThrow(() -> new RuntimeException("Person not found"));
+        List<FaceEmbedding> embeddings = faceEmbeddingRepository.findByPerson(person);
+        for (FaceEmbedding fe : embeddings) {
+            fe.setPerson(null);
+            faceEmbeddingRepository.save(fe);
+        }
+        faceEmbeddingRepository.deleteAll(embeddings);
+        facePersonRepository.delete(person);
+    }
+
     public List<Long> getMediaIdsForPersonName(String name) {
-        List<FacePerson> persons = facePersonRepository.findByName(name);
+        // Use case-insensitive partial match so that:
+        //   "chinmaya" matches stored name "Chinmaya"
+        //   "chin"     matches stored name "Chinmaya" (partial)
+        List<FacePerson> persons = facePersonRepository.findByNameContainingIgnoreCase(name);
         if (persons.isEmpty()) return Collections.emptyList();
 
         return persons.stream()
                 .flatMap(person -> faceEmbeddingRepository.findByPerson(person).stream())
+                .filter(fe -> fe.getMedia() != null)
                 .map(fe -> fe.getMedia().getId())
                 .distinct()
                 .collect(Collectors.toList());

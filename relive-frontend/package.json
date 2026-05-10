@@ -10,7 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/dm-sans": "^5.0.0",
+    "@fontsource/syne": "^5.0.0",
     "axios": "^1.13.6",
+    "leaflet": "^1.9.4",
+    "prop-types": "^15.8.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.1"

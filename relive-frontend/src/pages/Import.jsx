@@ -1,7 +1,16 @@
-import { useRef, useState, useEffect } from 'react';
-import { uploadFolder } from '../services/mediaService';
-import { getMyMedia } from '../services/mediaService';
+import { useRef, useState, useEffect, useCallback } from 'react';
+import { uploadFolder, getMyMedia } from '../services/mediaService';
 import AppLayout from '../components/AppLayout';
+
+// Realistic per-image processing time estimate in seconds (BLIP + CLIP + YOLO + face extraction)
+const SECONDS_PER_IMAGE = 25;
+
+function formatTime(seconds) {
+  if (seconds < 60) return `~${Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return s > 0 ? `~${m}m ${s}s` : `~${m}m`;
+}
 
 export default function Import() {
   const fileInputRef = useRef();
@@ -10,22 +19,32 @@ export default function Import() {
   const [message, setMessage] = useState('');
   const [queue, setQueue] = useState([]);
   const [dragOver, setDragOver] = useState(false);
+  const [showDonePopup, setShowDonePopup] = useState(false);
+  const prevProcessingCountRef = useRef(0);
+
+  const fetchQueue = useCallback(() => {
+    getMyMedia().then(data => {
+      const processing = data.filter(m => m.status === 'PROCESSING');
+      const completed = data.filter(m => m.status === 'COMPLETED');
+
+      // If we were processing and now everything is done, show popup
+      if (prevProcessingCountRef.current > 0 && processing.length === 0 && completed.length > 0) {
+        setShowDonePopup(true);
+      }
+      prevProcessingCountRef.current = processing.length;
+
+      setQueue([
+        ...processing.map(m => ({ ...m, display: 'processing' })),
+        ...completed.slice(0, 5).map(m => ({ ...m, display: 'done' })),
+      ]);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
-    const fetchQueue = () => {
-      getMyMedia().then(data => {
-        const processing = data.filter(m => m.status === 'PROCESSING');
-        const completed = data.filter(m => m.status === 'COMPLETED');
-        setQueue([
-          ...processing.map(m => ({ ...m, display: 'processing' })),
-          ...completed.slice(0, 3).map(m => ({ ...m, display: 'done' })),
-        ]);
-      }).catch(() => {});
-    };
     fetchQueue();
     const interval = setInterval(fetchQueue, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchQueue]);
 
   const handleFiles = async (files) => {
     const arr = Array.from(files);
@@ -55,28 +74,65 @@ export default function Import() {
     setProgress({ current: 0, total: 0 });
     fileInputRef.current.value = '';
 
-    // Refresh queue
-    setTimeout(() => {
-      getMyMedia().then(data => {
-        const processing = data.filter(m => m.status === 'PROCESSING');
-        const completed = data.filter(m => m.status === 'COMPLETED');
-        setQueue([
-          ...processing.map(m => ({ ...m, display: 'processing' })),
-          ...completed.slice(0, 3).map(m => ({ ...m, display: 'done' })),
-        ]);
-      }).catch(() => {});
-    }, 1000);
+    setTimeout(fetchQueue, 1000);
   };
 
   const processingItems = queue.filter(q => q.display === 'processing');
   const doneItems = queue.filter(q => q.display === 'done');
-  const totalProcessed = queue.filter(q => q.display === 'done').length;
-  const totalProcessing = processingItems.length;
-  const progPct = queue.length > 0 ? Math.round((totalProcessed / queue.length) * 100) : 0;
+  const totalProcessed = doneItems.length;
+  const totalInQueue = queue.length;
+  const progPct = totalInQueue > 0 ? Math.round((totalProcessed / totalInQueue) * 100) : 0;
+  const estimatedSecondsRemaining = processingItems.length * SECONDS_PER_IMAGE;
 
   return (
     <AppLayout>
       <div style={{ padding: '24px' }}>
+
+        {/* Completion popup */}
+        {showDonePopup && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+            onClick={() => setShowDonePopup(false)}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: '#0f1520',
+                border: '1px solid rgba(34,197,94,0.3)',
+                borderRadius: '18px',
+                padding: '36px 40px',
+                textAlign: 'center',
+                maxWidth: '340px',
+                width: '90%',
+                boxShadow: '0 0 40px rgba(34,197,94,0.1)',
+              }}
+            >
+              <div style={{ fontSize: '48px', marginBottom: '14px' }}>✅</div>
+              <div style={{ fontFamily: 'Syne, sans-serif', fontSize: '18px', fontWeight: '800', color: 'var(--text)', marginBottom: '8px' }}>
+                All photos processed!
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--text3)', marginBottom: '24px' }}>
+                Your photos are ready to search and browse.
+              </div>
+              <button
+                onClick={() => setShowDonePopup(false)}
+                style={{
+                  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                  border: 'none', borderRadius: '10px',
+                  padding: '10px 28px',
+                  fontSize: '13px', fontWeight: '700', color: '#fff',
+                  cursor: 'pointer', fontFamily: 'Syne, sans-serif',
+                }}
+              >
+                Got it 🎉
+              </button>
+            </div>
+          </div>
+        )}
+
         <div style={{ fontFamily: 'Syne, sans-serif', fontSize: '20px', fontWeight: '800', marginBottom: '20px' }}>
           Import Media
         </div>
@@ -179,11 +235,21 @@ export default function Import() {
                   Processing queue
                 </span>
                 <span style={{ fontSize: '13px', color: '#fbbf24', fontWeight: '600' }}>
-                  {totalProcessed} of {queue.length} done
+                  {totalProcessed} of {totalInQueue} done
                 </span>
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '10px' }}>
-                {totalProcessing > 0 ? `${totalProcessing} photo${totalProcessing > 1 ? 's' : ''} being analysed...` : 'All photos ready to search'}
+                {processingItems.length > 0
+                  ? (
+                    <>
+                      {processingItems.length} photo{processingItems.length > 1 ? 's' : ''} being analysed...
+                      <span style={{ color: '#f59e0b', marginLeft: '8px' }}>
+                        ⏱ Est. time remaining: {formatTime(estimatedSecondsRemaining)}
+                      </span>
+                    </>
+                  )
+                  : 'All photos ready to search'
+                }
               </div>
               <div style={{ height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
                 <div style={{
@@ -209,7 +275,7 @@ export default function Import() {
                 <div style={{ fontSize: '10px', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '7px' }}>
                   In progress
                 </div>
-                {processingItems.map(item => (
+                {processingItems.map((item, idx) => (
                   <div key={item.id} style={{
                     background: 'var(--surface)',
                     border: '1px solid var(--border)',
@@ -226,15 +292,19 @@ export default function Import() {
                         fontSize: '11px', color: 'var(--text2)', flex: 1,
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>{item.fileName}</div>
-                      <div style={{ fontSize: '10px', color: '#fbbf24', flexShrink: 0 }}>Analysing...</div>
+                      <div style={{ fontSize: '10px', color: '#fbbf24', flexShrink: 0 }}>
+                        {idx === 0 ? 'Analysing...' : `Est. ${formatTime((idx) * SECONDS_PER_IMAGE)} wait`}
+                      </div>
                     </div>
                     <div style={{ height: '2px', background: 'rgba(255,255,255,0.06)', borderRadius: '1px' }}>
-                      <div style={{
-                        height: '2px', width: '50%',
-                        background: 'linear-gradient(90deg, #d97706, #fbbf24)',
-                        borderRadius: '1px',
-                        animation: 'shimmer 1.5s infinite',
-                      }} />
+                      {idx === 0 && (
+                        <div style={{
+                          height: '2px', width: '50%',
+                          background: 'linear-gradient(90deg, #d97706, #fbbf24)',
+                          borderRadius: '1px',
+                          animation: 'shimmer 1.5s infinite',
+                        }} />
+                      )}
                     </div>
                   </div>
                 ))}

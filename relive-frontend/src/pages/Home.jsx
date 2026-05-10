@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
-import { getMyMedia } from '../services/mediaService';
+import { getMyMedia, getImageUrl, getFaceCropUrl } from '../services/mediaService';
 import { getPeople } from '../services/faceService';
-import { getImageUrl } from '../services/mediaService';
 
 export default function Home() {
   const navigate = useNavigate();
   const [media, setMedia] = useState([]);
   const [people, setPeople] = useState([]);
   const [progress, setProgress] = useState({ total: 0, completed: 0, processing: 0 });
+  const [locationCount, setLocationCount] = useState(0);
 
   useEffect(() => {
     getMyMedia().then(data => {
@@ -18,6 +18,14 @@ export default function Home() {
       const completed = data.filter(m => m.status === 'COMPLETED').length;
       const processing = data.filter(m => m.status === 'PROCESSING').length;
       setProgress({ total, completed, processing });
+
+      // Count unique locations
+      const locs = new Set(
+        data
+          .filter(m => m.location && m.location.trim())
+          .map(m => m.location.split('(')[0].trim())
+      );
+      setLocationCount(locs.size);
     }).catch(() => {});
 
     getPeople().then(setPeople).catch(() => {});
@@ -25,13 +33,20 @@ export default function Home() {
 
   const recent = media.slice(0, 6);
 
-  const statCard = (label, value, sub, subColor = '#f59e0b') => (
-    <div style={{
-      background: 'var(--surface)',
-      border: '1px solid var(--border)',
-      borderRadius: '12px',
-      padding: '14px 16px',
-    }}>
+  const statCard = (label, value, sub, subColor = '#f59e0b', onClick = null) => (
+    <div
+      onClick={onClick}
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: '12px',
+        padding: '14px 16px',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: onClick ? 'border-color 0.2s' : 'none',
+      }}
+      onMouseEnter={e => { if (onClick) e.currentTarget.style.borderColor = 'rgba(245,158,11,0.3)'; }}
+      onMouseLeave={e => { if (onClick) e.currentTarget.style.borderColor = 'var(--border)'; }}
+    >
       <div style={{ fontSize: '10px', color: 'var(--text3)', marginBottom: '5px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
       <div style={{ fontSize: '24px', fontWeight: '800', fontFamily: 'Syne, sans-serif', color: 'var(--text)' }}>{value}</div>
       {sub && <div style={{ fontSize: '11px', color: subColor, marginTop: '2px' }}>{sub}</div>}
@@ -100,7 +115,13 @@ export default function Home() {
           {statCard('Total photos', progress.total || '—', progress.total > 0 ? `${progress.processing} processing` : null)}
           {statCard('Processed', progress.completed || '—', progress.total > 0 ? `${Math.round((progress.completed / progress.total) * 100)}% done` : null)}
           {statCard('People found', people.length || '—', people.filter(p => !p.name).length > 0 ? `${people.filter(p => !p.name).length} unnamed` : 'All named', people.filter(p => !p.name).length > 0 ? '#f59e0b' : '#22c55e')}
-          {statCard('Locations', '—', 'from metadata')}
+          {statCard(
+            'Locations',
+            locationCount || '—',
+            locationCount > 0 ? 'View on map →' : 'from metadata',
+            '#f59e0b',
+            locationCount > 0 ? () => navigate('/map') : null
+          )}
         </div>
 
         {/* Recent Photos */}
@@ -196,7 +217,7 @@ export default function Home() {
                   }}>
                     {person.representativeCrop ? (
                       <img
-                        src={`http://localhost:8080/faces/crop?path=${encodeURIComponent(person.representativeCrop)}&token=${localStorage.getItem('token')}`}
+                        src={getFaceCropUrl(person.representativeCrop)}
                         alt=""
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />

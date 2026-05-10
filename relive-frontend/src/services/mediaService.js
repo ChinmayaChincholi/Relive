@@ -26,6 +26,12 @@ export const getProgress = async () => {
   return res.data.data;
 };
 
+export const deleteMedia = async (mediaId) => {
+  const res = await api.delete(`/media/${mediaId}`);
+  if (!res.data.success) throw new Error(res.data.message);
+  return res.data;
+};
+
 // Returns a URL the browser can use directly in an <img> src.
 // No token needed — the backend is local and unauthenticated.
 export const getImageUrl = (mediaId) =>
