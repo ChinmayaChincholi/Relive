@@ -16,6 +16,5 @@ public class FacePerson {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Null until the user assigns a name to this person cluster.
     private String name;
 }

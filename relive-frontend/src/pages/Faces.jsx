@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
+import ConfirmModal from '../components/ConfirmModal';
 import { getPeople, namePerson, mergePeople, deletePerson } from '../services/faceService';
 import { getFaceCropUrl } from '../services/mediaService';
 
@@ -16,12 +17,17 @@ export default function Faces() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   // Merge mode (select two groups to combine)
   const [mergeMode, setMergeMode] = useState(false);
   const [mergeSelectedIds, setMergeSelectedIds] = useState([]);
   const [merging, setMerging] = useState(false);
-  const [mergeNamePrompt, setMergeNamePrompt] = useState(false);
+
+  // Two-step merge flow: confirm first, then name the merged group.
+  const [pendingMergeIds, setPendingMergeIds] = useState(null); // [id1, id2]
+  const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
+  const [mergeNameOpen, setMergeNameOpen] = useState(false);
   const [mergeName, setMergeName] = useState('');
 
   // Drag-and-drop merge
@@ -60,7 +66,47 @@ export default function Faces() {
     }
   };
 
-  // ── Merge logic ───────────────────────────────────────────────────────────
+  // ── Merge flow ───────────────────────────────────────────────────────────
+  // Step 1: user triggers a merge (via button or drag-drop) → confirmation modal.
+  // Step 2: on confirm → naming modal, offering both existing names as quick
+  //         options plus a manual text field.
+  // Step 3: on choosing/typing a name → the actual merge API call runs.
+
+  const startMergeFlow = (id1, id2) => {
+    if (!id1 || !id2 || id1 === id2) return;
+    setPendingMergeIds([id1, id2]);
+    setMergeConfirmOpen(true);
+  };
+
+  const cancelMergeFlow = () => {
+    setPendingMergeIds(null);
+    setMergeConfirmOpen(false);
+    setMergeNameOpen(false);
+    setMergeName('');
+  };
+
+  const handleMergeConfirmed = () => {
+    setMergeConfirmOpen(false);
+    setMergeName('');
+    setMergeNameOpen(true);
+  };
+
+  const finalizeMerge = async (chosenName) => {
+    if (!pendingMergeIds) return;
+    const [id1, id2] = pendingMergeIds;
+    setMerging(true);
+    try {
+      await mergePeople(id1, id2, chosenName?.trim() || null);
+      setMergeMode(false);
+      setMergeSelectedIds([]);
+      cancelMergeFlow();
+      await fetchPeople();
+    } catch (e) {
+      alert('Merge failed: ' + e.message);
+    } finally {
+      setMerging(false);
+    }
+  };
 
   const handleMergeSelect = (personId) => {
     setMergeSelectedIds(prev => {
@@ -70,40 +116,9 @@ export default function Faces() {
     });
   };
 
-  const confirmMerge = async (overrideName) => {
-    if (mergeSelectedIds.length < 2) return;
-    const [id1, id2] = mergeSelectedIds;
-    const p1 = people.find(p => p.personId === id1);
-    const p2 = people.find(p => p.personId === id2);
-
-    // Determine name: prefer existing name from p1, else p2, else user input
-    let finalName = overrideName?.trim() || p1?.name || p2?.name || null;
-
-    setMerging(true);
-    try {
-      await mergePeople(id1, id2, finalName);
-      setMergeMode(false);
-      setMergeSelectedIds([]);
-      setMergeNamePrompt(false);
-      setMergeName('');
-      await fetchPeople();
-    } catch (e) {
-      alert('Merge failed: ' + e.message);
-    } finally {
-      setMerging(false);
-    }
-  };
-
   const initiateMerge = () => {
     if (mergeSelectedIds.length < 2) return;
-    const p1 = people.find(p => p.personId === mergeSelectedIds[0]);
-    const p2 = people.find(p => p.personId === mergeSelectedIds[1]);
-    // If both unnamed → ask for name
-    if (!p1?.name && !p2?.name) {
-      setMergeNamePrompt(true);
-    } else {
-      confirmMerge(null);
-    }
+    startMergeFlow(mergeSelectedIds[0], mergeSelectedIds[1]);
   };
 
   // ── Drag-and-drop merge ───────────────────────────────────────────────────
@@ -112,32 +127,17 @@ export default function Faces() {
     dragPersonId.current = personId;
   };
 
-  const handleDrop = async (targetPersonId) => {
+  const handleDrop = (targetPersonId) => {
     const sourceId = dragPersonId.current;
     dragPersonId.current = null;
     setDragOverId(null);
     if (!sourceId || sourceId === targetPersonId) return;
-
-    const src = people.find(p => p.personId === sourceId);
-    const tgt = people.find(p => p.personId === targetPersonId);
-    const name = src?.name || tgt?.name || null;
-
-    if (!name && !src?.name && !tgt?.name) {
-      // Ask for name via a quick prompt
-      const entered = window.prompt('Enter a name for the combined group (or leave blank):');
-      setMerging(true);
-      try {
-        await mergePeople(sourceId, targetPersonId, entered?.trim() || null);
-        await fetchPeople();
-      } catch (e) { alert('Merge failed'); } finally { setMerging(false); }
-    } else {
-      setMerging(true);
-      try {
-        await mergePeople(sourceId, targetPersonId, name);
-        await fetchPeople();
-      } catch (e) { alert('Merge failed'); } finally { setMerging(false); }
-    }
+    startMergeFlow(sourceId, targetPersonId);
   };
+
+  // Names of the two groups currently pending merge, for the naming modal.
+  const pendingP1 = pendingMergeIds ? people.find(p => p.personId === pendingMergeIds[0]) : null;
+  const pendingP2 = pendingMergeIds ? people.find(p => p.personId === pendingMergeIds[1]) : null;
 
   // ── Delete logic ──────────────────────────────────────────────────────────
 
@@ -150,9 +150,12 @@ export default function Faces() {
     });
   };
 
-  const handleDelete = async () => {
+  const requestDelete = () => {
     if (selectedIds.size === 0) return;
-    if (!window.confirm(`Delete ${selectedIds.size} group${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    setConfirmDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
     setDeleting(true);
     for (const id of selectedIds) {
       try { await deletePerson(id); } catch (e) { console.error('Delete failed for', id, e); }
@@ -160,6 +163,7 @@ export default function Faces() {
     setSelectedIds(new Set());
     setSelectMode(false);
     setDeleting(false);
+    setConfirmDeleteOpen(false);
     await fetchPeople();
   };
 
@@ -167,29 +171,77 @@ export default function Faces() {
     <AppLayout>
       <div style={{ padding: '24px' }}>
 
-        {/* Merge name prompt modal */}
-        {mergeNamePrompt && (
+        {/* Delete confirmation */}
+        <ConfirmModal
+          open={confirmDeleteOpen}
+          title={`Delete ${selectedIds.size} group${selectedIds.size > 1 ? 's' : ''}?`}
+          message="This cannot be undone."
+          confirmLabel="Delete"
+          danger
+          busy={deleting}
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDeleteOpen(false)}
+        />
+
+        {/* Step 1: merge confirmation */}
+        <ConfirmModal
+          open={mergeConfirmOpen}
+          title="Merge these two groups?"
+          message={`"${pendingP1?.name || 'Unnamed group'}" and "${pendingP2?.name || 'Unnamed group'}" will be combined into a single group. This cannot be undone.`}
+          confirmLabel="Yes, merge"
+          onConfirm={handleMergeConfirmed}
+          onCancel={cancelMergeFlow}
+        />
+
+        {/* Step 2: name the merged group */}
+        {mergeNameOpen && (
           <div style={{
-            position: 'fixed', inset: 0, zIndex: 1000,
+            position: 'fixed', inset: 0, zIndex: 1200,
             background: 'rgba(0,0,0,0.6)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             <div style={{
               background: '#0f1520', border: '1px solid var(--border2)',
               borderRadius: '16px', padding: '28px 32px',
-              maxWidth: '320px', width: '90%',
+              maxWidth: '340px', width: '90%',
             }}>
               <div style={{ fontFamily: 'Syne, sans-serif', fontSize: '15px', fontWeight: '700', marginBottom: '8px' }}>
                 Name this combined group
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text3)', marginBottom: '16px' }}>
-                Both groups are unnamed. Enter a name for the merged group (optional).
+                Choose one of the existing names, or type a new one.
               </div>
+
+              {/* Quick options: the two existing names */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+                <button
+                  onClick={() => finalizeMerge(pendingP1?.name || '')}
+                  disabled={merging}
+                  style={{
+                    padding: '9px 12px', textAlign: 'left',
+                    background: 'rgba(245,158,11,0.08)',
+                    border: '1px solid rgba(245,158,11,0.25)', borderRadius: '8px',
+                    fontSize: '12px', color: '#fbbf24', cursor: 'pointer',
+                  }}
+                >{pendingP1?.name ? `Use "${pendingP1.name}"` : 'Group 1 (unnamed) — leave unnamed'}</button>
+                <button
+                  onClick={() => finalizeMerge(pendingP2?.name || '')}
+                  disabled={merging}
+                  style={{
+                    padding: '9px 12px', textAlign: 'left',
+                    background: 'rgba(245,158,11,0.08)',
+                    border: '1px solid rgba(245,158,11,0.25)', borderRadius: '8px',
+                    fontSize: '12px', color: '#fbbf24', cursor: 'pointer',
+                  }}
+                >{pendingP2?.name ? `Use "${pendingP2.name}"` : 'Group 2 (unnamed) — leave unnamed'}</button>
+              </div>
+
+              <div style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '6px' }}>Or type a name:</div>
               <input
                 autoFocus
                 value={mergeName}
                 onChange={e => setMergeName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && confirmMerge(mergeName)}
+                onKeyDown={e => e.key === 'Enter' && mergeName.trim() && finalizeMerge(mergeName)}
                 placeholder="Enter name..."
                 style={{
                   width: '100%', background: 'rgba(255,255,255,0.04)',
@@ -200,7 +252,8 @@ export default function Faces() {
               />
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
-                  onClick={() => { setMergeNamePrompt(false); setMergeName(''); }}
+                  onClick={cancelMergeFlow}
+                  disabled={merging}
                   style={{
                     flex: 1, padding: '8px', background: 'var(--surface)',
                     border: '1px solid var(--border)', borderRadius: '8px',
@@ -208,14 +261,14 @@ export default function Faces() {
                   }}
                 >Cancel</button>
                 <button
-                  onClick={() => confirmMerge(mergeName)}
-                  disabled={merging}
+                  onClick={() => finalizeMerge(mergeName)}
+                  disabled={merging || !mergeName.trim()}
                   style={{
                     flex: 1, padding: '8px',
                     background: 'linear-gradient(135deg, #f59e0b, #d97706)',
                     border: 'none', borderRadius: '8px',
                     fontSize: '12px', fontWeight: '700', color: '#1c1004',
-                    cursor: 'pointer',
+                    cursor: 'pointer', opacity: mergeName.trim() ? 1 : 0.5,
                   }}
                 >{merging ? 'Merging...' : 'Merge'}</button>
               </div>
@@ -237,7 +290,7 @@ export default function Faces() {
             {/* Delete selected button */}
             {selectMode && selectedIds.size > 0 && (
               <button
-                onClick={handleDelete}
+                onClick={requestDelete}
                 disabled={deleting}
                 style={{
                   padding: '7px 14px', background: 'rgba(239,68,68,0.1)',
@@ -302,6 +355,15 @@ export default function Faces() {
               }}
             >Refresh</button>
           </div>
+        </div>
+
+        {/* Hint banner: duplicate groups can be merged */}
+        <div style={{
+          background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)',
+          borderRadius: '10px', padding: '10px 14px', marginBottom: '16px',
+          fontSize: '12px', color: '#fbbf24',
+        }}>
+          💡 Sometimes the same person ends up split across two groups. You can merge them any time — just drag one face card and drop it onto the other, or use "Merge Faces" above.
         </div>
 
         {/* Mode hints */}

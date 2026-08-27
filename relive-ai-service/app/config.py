@@ -1,60 +1,74 @@
+from app.hardware import Tier, cpu_ram_tier, gpu_tier
 
-# =============================================================================
-# RELIVE ML MODEL CONFIGURATION
-# Change model names here to switch between quality/speed tradeoffs.
-# All models run fully offline after first download.
-# =============================================================================
+VLM_MODEL_BY_TIER = {
+    Tier.LOW:  "vikhyatk/moondream2",
+    Tier.MID:  "Qwen/Qwen2-VL-2B-Instruct",
+    Tier.HIGH: "Qwen/Qwen2-VL-7B-Instruct",
+}
+VLM_MAX_NEW_TOKENS = 400
 
-# ── CAPTIONING MODEL ─────────────────────────────────────────────────────────
-# Options (best to fastest):
-#   "Salesforce/blip-image-captioning-large"   ~900MB  ~35-45s/image  best quality
-#   "Salesforce/blip-image-captioning-base"    ~450MB  ~8-12s/image   good quality
-CAPTIONING_MODEL = "Salesforce/blip-image-captioning-large"
+CLIP_MODEL_BY_TIER = {
+    Tier.LOW:  "openai/clip-vit-base-patch32",
+    Tier.MID:  "openai/clip-vit-base-patch32",
+    Tier.HIGH: "openai/clip-vit-large-patch14",
+}
 
-# Max caption length (tokens). Increase for more detailed captions.
-CAPTIONING_MAX_LENGTH = 100
+TEXT_EMBEDDING_MODEL_BY_TIER = {
+    Tier.LOW:  "BAAI/bge-small-en-v1.5",
+    Tier.MID:  "BAAI/bge-base-en-v1.5",
+    Tier.HIGH: "BAAI/bge-large-en-v1.5",
+}
+TEXT_EMBEDDING_DIM_BY_TIER = {
+    Tier.LOW: 384,
+    Tier.MID: 768,
+    Tier.HIGH: 1024,
+}
 
-# Number of beams for beam search. Higher = better quality, slower.
-# 5 is a good balance. Use 1 for fastest (greedy decoding).
-CAPTIONING_NUM_BEAMS = 5
-
-# ── CLIP EMBEDDING MODEL ──────────────────────────────────────────────────────
-# Options (best to fastest):
-#   "openai/clip-vit-large-patch14"    ~900MB   ~8-12s/image   best search quality
-#   "openai/clip-vit-base-patch32"     ~350MB   ~2-4s/image    good search quality
-CLIP_MODEL = "openai/clip-vit-base-patch32"
-
-# ── FACE RECOGNITION MODEL ───────────────────────────────────────────────────
-# Options (best to fastest):
-#   "Facenet512"    512-dim embeddings, best clustering accuracy
-#   "Facenet"       128-dim embeddings, faster, slightly less accurate
-FACE_RECOGNITION_MODEL = "Facenet512"
-
-# ── FACE DETECTION (for counting faces in photos) ────────────────────────────
-# YOLO face model file — must exist in relive-ai-service root
-YOLO_FACE_MODEL = "yolov8n-face-lindevs.pt"
-
-# Minimum YOLO face detection confidence (0.0 to 1.0)
-YOLO_FACE_CONFIDENCE = 0.5
-
-# ── OBJECT DETECTION MODEL ───────────────────────────────────────────────────
-# Options (best to fastest):
-#   "yolov8m.pt"   medium model, ~50MB, better accuracy
-#   "yolov8n.pt"   nano model,   ~6MB,  fastest
-OBJECT_DETECTION_MODEL = "yolov8n.pt"
-
-# Minimum object detection confidence (0.0 to 1.0)
+OBJECT_DETECTION_MODEL_BY_TIER = {
+    Tier.LOW:  "rfdetr-nano",
+    Tier.MID:  "rfdetr-medium",
+    Tier.HIGH: "rfdetr-large",
+}
 OBJECT_DETECTION_CONFIDENCE = 0.4
 
-# ── FACE EMBEDDING SETTINGS ──────────────────────────────────────────────────
-# Minimum face crop size in pixels to process (smaller = more false positives)
-MIN_FACE_SIZE = 30
+OBJECT_DETECTION_ALLOW_PML_XL = False
 
-# Maximum image dimension before resizing (larger = more detail, more memory)
+FACE_MODEL_PACK_BY_TIER = {
+    Tier.LOW:  "buffalo_s",
+    Tier.MID:  "buffalo_l",
+    Tier.HIGH: "buffalo_l",
+}
+FACE_DETECTION_CONFIDENCE = 0.5
+MIN_FACE_SIZE = 30
 MAX_IMAGE_DIMENSION = 1280
 
-# ── CLUSTERING SETTINGS ──────────────────────────────────────────────────────
-# DBSCAN epsilon — controls how similar faces must be to cluster together.
-# Lower = stricter (fewer false matches), Higher = looser (more grouping)
-# Recommended range: 0.15 (strict) to 0.40 (loose)
-FACE_CLUSTER_EPS = 0.35
+FACE_CLUSTER_MIN_CLUSTER_SIZE = 2
+FACE_CLUSTER_MIN_SAMPLES = 1
+FACE_CLUSTER_METRIC = "euclidean"
+
+QUERY_LLM_MODEL_BY_TIER = {
+    Tier.LOW:  "Qwen3.5-4B-Q4_K_M.gguf",
+    Tier.MID:  "Qwen3.5-9B-Q4_K_M.gguf",
+    Tier.HIGH: "Qwen3.8-27B-Instruct-Q4_K_M.gguf",
+}
+QUERY_LLM_CONTEXT_WINDOW = 4096
+QUERY_LLM_MAX_NEW_TOKENS = 512
+
+QUERY_LLM_APPROX_GB_BY_TIER = {
+    Tier.LOW: 3.0,
+    Tier.MID: 6.0,
+    Tier.HIGH: 17.0,
+}
+
+QUERY_VERIFICATION_DEFAULT_ENABLED = False
+QUERY_VERIFICATION_TOP_K = 30
+
+SEMANTIC_SEARCH_TOP_K = 50
+SEMANTIC_SEARCH_MIN_SCORE = 0.15
+
+VLM_TIER = gpu_tier()
+CLIP_TIER = gpu_tier()
+TEXT_EMBEDDING_TIER = cpu_ram_tier()
+OBJECT_DETECTION_TIER = gpu_tier()
+FACE_TIER = gpu_tier()
+QUERY_LLM_TIER = cpu_ram_tier()

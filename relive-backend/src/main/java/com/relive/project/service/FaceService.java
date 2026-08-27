@@ -20,7 +20,6 @@ public class FaceService {
     private final FacePersonRepository facePersonRepository;
     private final MediaRepository mediaRepository;
 
-    // ── Face extraction (called after each image is processed) ────────
 
     public void extractAndStoreFaces(Long mediaId, String absoluteImagePath) {
         try {
@@ -49,27 +48,16 @@ public class FaceService {
                         .embeddingCsv(embeddingCsv)
                         .confidence(confidence)
                         .media(media)
-                        .person(null) // unassigned until clustering
                         .build();
 
-                faceEmbeddingRepository.save(fe);
+                assignOrCreatePerson(fe);
             }
         } catch (Exception e) {
             System.out.println("Face extraction failed for media " + mediaId + ": " + e.getMessage());
         }
     }
 
-    // ── Clustering ────────────────────────────────────────────────────
 
-    /**
-     * Smart incremental clustering.
-     *  - Only triggers when there are new unassigned embeddings.
-     *  - Clusters ALL embeddings together so new faces are compared against existing ones.
-     *  - Preserves names on existing FacePerson records.
-     *
-     * NOTE: Called by MediaProcessingService after each image finishes processing,
-     * NOT from the read path (getPeople). This keeps the Faces page fast.
-     */
     @Transactional
     public void clusterAndAssign() {
         try {
@@ -96,7 +84,6 @@ public class FaceService {
                 return;
             }
 
-            // Group embeddings by cluster label (-1 = noise, skip)
             Map<Integer, List<FaceEmbedding>> clusters = new HashMap<>();
             for (int i = 0; i < labels.size(); i++) {
                 int label = labels.get(i);
@@ -104,8 +91,6 @@ public class FaceService {
                 clusters.computeIfAbsent(label, k -> new ArrayList<>()).add(allEmbeddings.get(i));
             }
 
-            // Match each cluster to an existing FacePerson if any embedding in the
-            // cluster is already assigned (preserves the existing name).
             Map<Integer, FacePerson> clusterToExistingPerson = new HashMap<>();
             for (Map.Entry<Integer, List<FaceEmbedding>> entry : clusters.entrySet()) {
                 for (FaceEmbedding fe : entry.getValue()) {
@@ -116,7 +101,6 @@ public class FaceService {
                 }
             }
 
-            // Assign embeddings to persons, creating new unnamed persons for new clusters
             for (Map.Entry<Integer, List<FaceEmbedding>> entry : clusters.entrySet()) {
                 int clusterLabel = entry.getKey();
                 List<FaceEmbedding> clusterEmbeddings = entry.getValue();
@@ -135,7 +119,6 @@ public class FaceService {
                 }
             }
 
-            // Remove any FacePerson records left with no embeddings after reclustering
             List<FacePerson> allPersons = facePersonRepository.findAll();
             for (FacePerson person : allPersons) {
                 if (faceEmbeddingRepository.findByPerson(person).isEmpty()) {
@@ -151,12 +134,6 @@ public class FaceService {
         }
     }
 
-    // ── Queries ───────────────────────────────────────────────────────
-
-    /**
-     * Returns the list of known persons sorted by number of photos (descending).
-     * Does NOT trigger clustering — clustering happens in the background after each image is processed.
-     */
     public List<FacePersonDTO> getPeople() {
         List<FacePerson> persons = facePersonRepository.findAll();
         List<FacePersonDTO> result = new ArrayList<>();
@@ -187,7 +164,6 @@ public class FaceService {
             result.add(dto);
         }
 
-        // Sort by photo count descending
         result.sort((a, b) -> Integer.compare(b.getMediaIds().size(), a.getMediaIds().size()));
 
         return result;
@@ -200,11 +176,6 @@ public class FaceService {
         facePersonRepository.save(person);
     }
 
-    /**
-     * Merge two face groups into one. All embeddings from person2 are reassigned to person1.
-     * Person1 gets the provided name (or falls back to existing names).
-     * Person2 is deleted.
-     */
     @Transactional
     public void mergePeople(Long personId1, Long personId2, String overrideName) {
         FacePerson person1 = facePersonRepository.findById(personId1)
@@ -212,7 +183,6 @@ public class FaceService {
         FacePerson person2 = facePersonRepository.findById(personId2)
                 .orElseThrow(() -> new RuntimeException("Person " + personId2 + " not found"));
 
-        // Determine final name
         String finalName = overrideName != null && !overrideName.isBlank()
                 ? overrideName
                 : (person1.getName() != null ? person1.getName() : person2.getName());
@@ -220,22 +190,17 @@ public class FaceService {
         person1.setName(finalName);
         facePersonRepository.save(person1);
 
-        // Reassign all embeddings from person2 to person1
         List<FaceEmbedding> embeddings2 = faceEmbeddingRepository.findByPerson(person2);
         for (FaceEmbedding fe : embeddings2) {
             fe.setPerson(person1);
             faceEmbeddingRepository.save(fe);
         }
 
-        // Delete person2
         facePersonRepository.delete(person2);
 
         System.out.println("Merged person " + personId2 + " into " + personId1 + " as '" + finalName + "'");
     }
 
-    /**
-     * Delete a face person group and all its embeddings.
-     */
     @Transactional
     public void deletePerson(Long personId) {
         FacePerson person = facePersonRepository.findById(personId)
@@ -249,11 +214,16 @@ public class FaceService {
         facePersonRepository.delete(person);
     }
 
-    public List<Long> getMediaIdsForPersonName(String name) {
-        // Use case-insensitive partial match so that:
-        //   "chinmaya" matches stored name "Chinmaya"
-        //   "chin"     matches stored name "Chinmaya" (partial)
-        List<FacePerson> persons = facePersonRepository.findByNameContainingIgnoreCase(name);
+    public List<String> getAllPersonNames() {
+        return facePersonRepository.findAll().stream()
+                .map(FacePerson::getName)
+                .filter(Objects::nonNull)
+                .filter(name -> !name.isBlank())
+                .collect(Collectors.toList());
+    }
+
+    public List<Long> getMediaIdsForPersonExact(String resolvedName) {
+        List<FacePerson> persons = facePersonRepository.findByNameIgnoreCase(resolvedName);
         if (persons.isEmpty()) return Collections.emptyList();
 
         return persons.stream()
@@ -276,13 +246,61 @@ public class FaceService {
                 .collect(Collectors.toList());
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────
-
     private String pickBestRepresentativeCrop(List<FaceEmbedding> embeddings) {
         return embeddings.stream()
                 .filter(fe -> fe.getConfidence() != null)
                 .max(Comparator.comparingDouble(FaceEmbedding::getConfidence))
                 .map(FaceEmbedding::getCropPath)
                 .orElse(embeddings.get(0).getCropPath());
+    }
+
+    private static final double PERSON_MATCH_THRESHOLD = 0.5;
+
+    private void assignOrCreatePerson(FaceEmbedding newEmbedding) {
+        double[] newVec = parseEmbedding(newEmbedding.getEmbeddingCsv());
+
+        List<FaceEmbedding> assigned = faceEmbeddingRepository.findAll().stream()
+                .filter(fe -> fe.getPerson() != null)
+                .collect(Collectors.toList());
+
+        FacePerson bestMatch = null;
+        double bestScore = PERSON_MATCH_THRESHOLD;
+
+        for (FaceEmbedding candidate : assigned) {
+            double[] candidateVec = parseEmbedding(candidate.getEmbeddingCsv());
+            double similarity = cosineSimilarity(newVec, candidateVec);
+            if (similarity > bestScore) {
+                bestScore = similarity;
+                bestMatch = candidate.getPerson();
+            }
+        }
+
+        if (bestMatch != null) {
+            newEmbedding.setPerson(bestMatch);
+        } else {
+            FacePerson newPerson = FacePerson.builder().name(null).build();
+            facePersonRepository.save(newPerson);
+            newEmbedding.setPerson(newPerson);
+        }
+
+        faceEmbeddingRepository.save(newEmbedding);
+    }
+
+    private double[] parseEmbedding(String csv) {
+        String[] parts = csv.split(",");
+        double[] vec = new double[parts.length];
+        for (int i = 0; i < parts.length; i++) vec[i] = Double.parseDouble(parts[i]);
+        return vec;
+    }
+
+    private double cosineSimilarity(double[] a, double[] b) {
+        double dot = 0, normA = 0, normB = 0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        if (normA == 0 || normB == 0) return 0;
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 }

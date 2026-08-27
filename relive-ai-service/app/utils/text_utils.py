@@ -1,6 +1,5 @@
 import re
 
-
 def normalize_object(obj):
 
     obj = obj.lower().strip()

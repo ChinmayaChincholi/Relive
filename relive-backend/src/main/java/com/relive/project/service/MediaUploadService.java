@@ -29,13 +29,11 @@ public class MediaUploadService {
         try {
             String fileHash = calculateFileHash(file);
 
-            // Deduplication: skip if this exact file is already in the library.
             Optional<Media> existing = mediaRepository.findByFileHash(fileHash);
             if (existing.isPresent()) {
                 return "File already exists. Skipping reprocessing.";
             }
 
-            // Ensure uploads directory exists (also guaranteed at startup, but belt-and-suspenders).
             File directory = new File(uploadDir);
             if (!directory.exists()) {
                 directory.mkdirs();
@@ -49,7 +47,6 @@ public class MediaUploadService {
 
             String uniqueFileName = UUID.randomUUID() + extension;
 
-            // Store as absolute path so it is stable regardless of working directory.
             String absolutePath = directory.getAbsolutePath() + File.separator + uniqueFileName;
 
             File destination = new File(absolutePath);
@@ -70,7 +67,6 @@ public class MediaUploadService {
 
             mediaRepository.save(media);
 
-            // Dispatch to single-threaded async executor queue.
             mediaProcessingService.processMedia(media.getId(), absolutePath);
 
             return "File uploaded. Processing started.";

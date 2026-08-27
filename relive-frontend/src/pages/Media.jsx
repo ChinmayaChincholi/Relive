@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
+import ConfirmModal from '../components/ConfirmModal';
 import { getMyMedia, getImageUrl, deleteMedia } from '../services/mediaService';
 
 export default function Media() {
+  const navigate = useNavigate();
   const [mediaList, setMediaList] = useState([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   const loadMedia = () => {
     getMyMedia().then(data => {
@@ -58,9 +62,12 @@ export default function Media() {
     });
   };
 
-  const handleDelete = async () => {
+  const requestDelete = () => {
     if (selected.size === 0) return;
-    if (!window.confirm(`Delete ${selected.size} photo${selected.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    setConfirmDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
     setDeleting(true);
     for (const id of selected) {
       try { await deleteMedia(id); } catch (e) { console.error('Delete failed for', id, e); }
@@ -68,13 +75,21 @@ export default function Media() {
     setSelected(new Set());
     setSelectMode(false);
     setDeleting(false);
+    setConfirmDeleteOpen(false);
     loadMedia();
+  };
+
+  const handleViewDetails = () => {
+    if (selected.size !== 1) return;
+    const [onlyId] = selected;
+    navigate(`/media/${onlyId}`);
   };
 
   const renderPhotoCard = (item) => (
     <div
       key={item.id}
       onClick={() => selectMode && toggleSelect(item.id)}
+      onDoubleClick={() => navigate(`/media/${item.id}`)}
       style={{
         borderRadius: '10px', overflow: 'hidden',
         background: 'var(--surface)',
@@ -159,6 +174,17 @@ export default function Media() {
   return (
     <AppLayout>
       <div style={{ padding: '24px' }}>
+        <ConfirmModal
+          open={confirmDeleteOpen}
+          title={`Delete ${selected.size} photo${selected.size > 1 ? 's' : ''}?`}
+          message="This cannot be undone."
+          confirmLabel="Delete"
+          danger
+          busy={deleting}
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDeleteOpen(false)}
+        />
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
           <div>
             <div style={{ fontFamily: 'Syne, sans-serif', fontSize: '20px', fontWeight: '800', marginBottom: '2px' }}>
@@ -168,10 +194,20 @@ export default function Media() {
               {mediaList.length} photos · {processing} processing · {completed} ready
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {selectMode && selected.size === 1 && (
+              <button
+                onClick={handleViewDetails}
+                style={{
+                  padding: '7px 14px', background: 'rgba(245,158,11,0.1)',
+                  border: '1px solid rgba(245,158,11,0.3)', borderRadius: '8px',
+                  fontSize: '12px', color: '#fbbf24', cursor: 'pointer',
+                }}
+              >View Details</button>
+            )}
             {selectMode && selected.size > 0 && (
               <button
-                onClick={handleDelete}
+                onClick={requestDelete}
                 disabled={deleting}
                 style={{
                   padding: '7px 14px', background: 'rgba(239,68,68,0.1)',
@@ -183,13 +219,22 @@ export default function Media() {
             <button
               onClick={() => { setSelectMode(s => !s); setSelected(new Set()); }}
               style={{
-                padding: '7px 14px', background: selectMode ? 'rgba(245,158,11,0.1)' : 'var(--surface)',
+                padding: '10px 20px', background: selectMode ? 'rgba(245,158,11,0.1)' : 'var(--surface)',
                 border: `1px solid ${selectMode ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
-                borderRadius: '8px', fontSize: '12px',
+                borderRadius: '9px', fontSize: '13px', fontWeight: '600',
                 color: selectMode ? '#f59e0b' : 'var(--text2)', cursor: 'pointer',
               }}
             >{selectMode ? 'Cancel' : 'Select'}</button>
           </div>
+        </div>
+
+        {/* Hint banner */}
+        <div style={{
+          background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)',
+          borderRadius: '10px', padding: '10px 14px', marginBottom: '16px',
+          fontSize: '12px', color: '#fbbf24',
+        }}>
+          💡 Double click on an image to view its details. Single click to select it.
         </div>
 
         {/* Filters */}

@@ -2,8 +2,13 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List
 import numpy as np
-from sklearn.cluster import DBSCAN
-from app.config import FACE_CLUSTER_EPS
+import hdbscan
+
+from app.config import (
+    FACE_CLUSTER_MIN_CLUSTER_SIZE,
+    FACE_CLUSTER_MIN_SAMPLES,
+    FACE_CLUSTER_METRIC,
+)
 
 from app.models.face_model import extract_faces_from_image
 
@@ -39,7 +44,6 @@ def extract_faces(request: FaceExtractionRequest):
 
 @router.post("/cluster_faces")
 def cluster_faces(request: ClusterRequest):
-
     if not request.embeddings:
         return {"labels": []}
 
@@ -48,12 +52,13 @@ def cluster_faces(request: ClusterRequest):
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     embeddings = embeddings / np.where(norms == 0, 1, norms)
 
-    clustering = DBSCAN(
-        eps=FACE_CLUSTER_EPS,
-        min_samples=1,
-        metric="cosine"
-    ).fit(embeddings)
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=FACE_CLUSTER_MIN_CLUSTER_SIZE,
+        min_samples=FACE_CLUSTER_MIN_SAMPLES,
+        metric=FACE_CLUSTER_METRIC,
+    )
+    labels = clusterer.fit_predict(embeddings)
 
     return {
-        "labels": clustering.labels_.tolist()
+        "labels": labels.tolist()
     }

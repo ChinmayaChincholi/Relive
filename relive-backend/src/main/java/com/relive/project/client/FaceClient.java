@@ -61,8 +61,6 @@ public class FaceClient {
             return Collections.emptyList();
         }
 
-        // Jackson deserializes JSON integers as Integer when using raw Map,
-        // but the list elements come back as Object — cast each one individually.
         List<?> rawList = (List<?>) raw;
         List<Integer> labels = new ArrayList<>(rawList.size());
         for (Object item : rawList) {

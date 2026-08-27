@@ -17,9 +17,17 @@ public class SemanticSearchClient {
     @Value("${ai.service.url}")
     private String aiServiceUrl;
 
-    public Map<Long, Double> semanticSearch(String query) {
+    public Map<Long, Double> clipSearch(String query) {
+        return search("/semantic_search", query);
+    }
 
-        String url = aiServiceUrl + "/semantic_search";
+    public Map<Long, Double> textSearch(String query) {
+        return search("/text_search", query);
+    }
+
+    private Map<Long, Double> search(String path, String query) {
+
+        String url = aiServiceUrl + path;
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -36,19 +44,18 @@ public class SemanticSearchClient {
                         Map.class
                 );
 
-        List<?> rawResults = (List<?>) response.getBody().get("results");
-
+        Map responseBody = response.getBody();
         Map<Long, Double> results = new LinkedHashMap<>();
 
+        if (responseBody == null) return results;
+
+        List<?> rawResults = (List<?>) responseBody.get("results");
+
         if (rawResults != null) {
-
             for (Object obj : rawResults) {
-
                 Map<?, ?> item = (Map<?, ?>) obj;
-
                 Number mediaId = (Number) item.get("media_id");
                 Number score = (Number) item.get("score");
-
                 results.put(mediaId.longValue(), score.doubleValue());
             }
         }

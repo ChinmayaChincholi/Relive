@@ -2,15 +2,19 @@ package com.relive.project.service;
 
 import com.relive.project.client.QueryParserClient;
 import com.relive.project.client.SemanticSearchClient;
+import com.relive.project.client.VerificationClient;
 import com.relive.project.dto.ParsedQueryResponse;
 import com.relive.project.entity.Media;
 import com.relive.project.entity.MediaObject;
 import com.relive.project.repository.MediaObjectRepository;
 import com.relive.project.repository.MediaRepository;
+import com.relive.project.util.JaroWinklerUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -21,10 +25,17 @@ public class MediaSearchService {
     private final SemanticSearchClient semanticSearchClient;
     private final FaceService faceService;
     private final QueryParserClient queryParserClient;
+    private final VerificationClient verificationClient;
+
+    private static final double FUZZY_THRESHOLD = JaroWinklerUtil.DEFAULT_THRESHOLD;
+    private static final int RRF_K = 60;
+    private static final int REFINE_TOP_K = 30;
 
     public List<Media> searchByNaturalQuery(String query) {
+        return searchByNaturalQuery(query, false);
+    }
 
-        // ── Parse query ───────────────────────────────────────────────
+    public List<Media> searchByNaturalQuery(String query, boolean refine) {
         ParsedQueryResponse parsed = null;
         try {
             parsed = queryParserClient.parseQuery(query);
@@ -32,273 +43,220 @@ public class MediaSearchService {
             System.out.println("Query parser failed: " + e.getMessage());
         }
 
-        List<String> nouns         = safe(parsed != null ? parsed.getObjects()        : null);
-        List<String> verbs         = safe(parsed != null ? parsed.getVerbs()          : null);
-        List<String> allTerms      = safe(parsed != null ? parsed.getAll_terms()      : null);
-        List<String> locationHints = safe(parsed != null ? parsed.getLocation_hints() : null);
-        List<String> negatedTerms  = safe(parsed != null ? parsed.getNegated_terms()  : null);
-        List<String> queryWords    = safe(parsed != null ? parsed.getQuery_words()    : null);
-        Integer year      = parsed != null ? parsed.getYear()        : null;
-        Integer month     = parsed != null ? parsed.getMonth()       : null;
-        Integer minFaces  = parsed != null ? parsed.getMin_faces()   : null;
-        String  timeOfDay = parsed != null ? parsed.getTime_of_day() : null;
+        List<String> mustInclude = safe(parsed != null ? parsed.getMust_include() : null);
+        List<String> mustExclude = safe(parsed != null ? parsed.getMust_exclude() : null);
+        List<List<String>> anyOf = parsed != null && parsed.getAny_of() != null
+                ? parsed.getAny_of() : Collections.emptyList();
+        List<String> personCandidates = safe(parsed != null ? parsed.getPersons() : null);
+        List<String> locationCandidates = safe(parsed != null ? parsed.getLocations() : null);
+        Integer year = parsed != null ? parsed.getYear() : null;
+        Integer month = parsed != null ? parsed.getMonth() : null;
+        Integer minPeople = parsed != null ? parsed.getMin_people() : null;
+        String timeOfDay = parsed != null ? parsed.getTime_of_day() : null;
+        String freeTextSemantic = (parsed != null
+                && parsed.getFree_text_semantic() != null
+                && !parsed.getFree_text_semantic().isBlank())
+                ? parsed.getFree_text_semantic()
+                : query;
 
         System.out.println("=== SEARCH DEBUG ===");
         System.out.println("Query: " + query);
-        System.out.println("Query words: " + queryWords);
-        System.out.println("Nouns: " + nouns);
-        System.out.println("Location hints (spaCy): " + locationHints);
+        System.out.println("must_include=" + mustInclude + " must_exclude=" + mustExclude + " any_of=" + anyOf);
+        System.out.println("persons=" + personCandidates + " locations=" + locationCandidates);
+        System.out.println("year=" + year + " month=" + month + " minPeople=" + minPeople + " timeOfDay=" + timeOfDay);
 
-        // ── Get all completed media ───────────────────────────────────
         List<Media> allMedia = mediaRepository.findByStatus("COMPLETED");
-        Map<Long, Media> mediaMap = new HashMap<>();
-        for (Media m : allMedia) mediaMap.put(m.getId(), m);
 
-        // ── Person name resolution ────────────────────────────────────
-        // Check every query word directly against the face DB.
-        // Case-insensitive partial match — "nitin" matches "Nitin", "chimu" matches "Chimu".
-        Set<Long> personNameMediaIds = new HashSet<>();
-        Set<String> wordsMatchedAsPersons = new HashSet<>();
-        boolean hasPersonNameMatch = false;
-
-        for (String word : queryWords) {
-            if (word.length() < 2) continue;
-            List<Long> ids = faceService.getMediaIdsForPersonName(word);
-            System.out.println("Face lookup '" + word + "' → " + ids.size() + " photos");
-            if (!ids.isEmpty()) {
-                personNameMediaIds.addAll(ids);
-                wordsMatchedAsPersons.add(word);
-                hasPersonNameMatch = true;
+        List<String> allPersonNames = faceService.getAllPersonNames();
+        Set<Long> personMediaIds = new HashSet<>();
+        boolean hasPersonMatch = false;
+        for (String candidate : personCandidates) {
+            String resolved = JaroWinklerUtil.bestMatch(candidate, allPersonNames, FUZZY_THRESHOLD);
+            if (resolved != null) {
+                List<Long> ids = faceService.getMediaIdsForPersonExact(resolved);
+                System.out.println("Person '" + candidate + "' fuzzy-resolved to '" + resolved + "' -> " + ids.size() + " photos");
+                personMediaIds.addAll(ids);
+                hasPersonMatch = true;
             }
         }
 
-        // ── Location resolution ───────────────────────────────────────
-        // Strategy:
-        // 1. Check spaCy location hints first (most reliable)
-        // 2. Then check query_words against ACTUAL stored location strings
-        //    (so "ooty" matches "Ooty, Tamil Nadu, IN (11.4102,76.6950)")
-        // 3. A word matched as a person name is NOT used for location matching
-        //    (disambiguation: if "ooty" is both a face name and a location, person wins)
-        List<String> allStoredLocations = mediaRepository.findDistinctLocations();
-
-        String requiredLocation = null;
-
-        // Step 1: spaCy NER location hints
-        for (String hint : locationHints) {
-            for (String loc : allStoredLocations) {
-                if (loc != null && loc.toLowerCase().contains(hint.toLowerCase())) {
-                    requiredLocation = hint;
-                    System.out.println("Location matched via spaCy NER: '" + hint + "'");
-                    break;
+        List<String> allLocations = mediaRepository.findDistinctLocations();
+        Set<String> matchedLocationStrings = new HashSet<>();
+        for (String candidate : locationCandidates) {
+            for (String loc : allLocations) {
+                if (loc != null && JaroWinklerUtil.containsFuzzyToken(loc, candidate, FUZZY_THRESHOLD)) {
+                    matchedLocationStrings.add(loc);
                 }
             }
-            if (requiredLocation != null) break;
+        }
+        boolean hasLocationFilter = !matchedLocationStrings.isEmpty();
+
+        List<String> allTagNames = mediaObjectRepository.findDistinctObjectNames();
+
+        Map<String, Set<Long>> mustIncludeToMediaIds = resolveTagsToMediaIds(mustInclude, allTagNames);
+        Map<String, Set<Long>> mustExcludeToMediaIds = resolveTagsToMediaIds(mustExclude, allTagNames);
+
+        List<Map<String, Set<Long>>> anyOfResolved = new ArrayList<>();
+        for (List<String> group : anyOf) {
+            anyOfResolved.add(resolveTagsToMediaIds(group, allTagNames));
         }
 
-        // Step 2: Check query_words against stored location strings
-        // Skip words that were already matched as person names
-        if (requiredLocation == null) {
-            for (String word : queryWords) {
-                if (word.length() < 2) continue;
-                if (wordsMatchedAsPersons.contains(word)) continue; // person takes priority
-
-                for (String loc : allStoredLocations) {
-                    if (loc != null && loc.toLowerCase().contains(word.toLowerCase())) {
-                        requiredLocation = word;
-                        System.out.println("Location matched via query_words: '" + word + "'");
-                        break;
-                    }
-                }
-                if (requiredLocation != null) break;
-            }
-        }
-
-        System.out.println("Required location: " + requiredLocation);
-        System.out.println("Person match: " + hasPersonNameMatch + " (" + personNameMediaIds.size() + " photos)");
-        System.out.println("====================");
-
-        // ── Object filter (common nouns only) ────────────────────────
-        Map<String, Set<Long>> nounToMediaIds = new HashMap<>();
-        boolean hasAnyObjectMatch = false;
-
-        for (String noun : nouns) {
-            if (noun.length() < 2) continue;
-            List<MediaObject> matches = mediaObjectRepository
-                    .findByObjectNameContainingIgnoreCase(noun);
-            if (!matches.isEmpty()) {
-                hasAnyObjectMatch = true;
-                Set<Long> matchingIds = new HashSet<>();
-                for (MediaObject obj : matches) matchingIds.add(obj.getMedia().getId());
-                nounToMediaIds.put(noun, matchingIds);
-            }
-        }
-
-        // ── Negation exclusion ────────────────────────────────────────
-        Set<Long> negatedMediaIds = new HashSet<>();
-        for (String negTerm : negatedTerms) {
-            if (negTerm.length() < 2) continue;
-            for (MediaObject obj : mediaObjectRepository.findByObjectNameContainingIgnoreCase(negTerm)) {
-                negatedMediaIds.add(obj.getMedia().getId());
-            }
+        Set<Long> negatedMediaIds = mustExcludeToMediaIds.values().stream()
+                .flatMap(Set::stream)
+                .collect(Collectors.toCollection(HashSet::new));
+        for (String term : mustExclude) {
             for (Media m : allMedia) {
-                if (m.getSceneCaption() != null &&
-                        m.getSceneCaption().toLowerCase().contains(negTerm)) {
+                if (m.getSceneCaption() != null
+                        && m.getSceneCaption().toLowerCase().contains(term.toLowerCase())) {
                     negatedMediaIds.add(m.getId());
                 }
             }
         }
 
-        // ── CLIP semantic scores ──────────────────────────────────────
-        Map<Long, Double> clipScores = new HashMap<>();
+        Map<Long, Double> clipScores = safeMap(() -> semanticSearchClient.clipSearch(freeTextSemantic));
+        Map<Long, Double> textScores = safeMap(() -> semanticSearchClient.textSearch(freeTextSemantic));
+        Map<Long, Integer> clipRanks = toRankMap(clipScores);
+        Map<Long, Integer> textRanks = toRankMap(textScores);
+
+        boolean hasAnyMustInclude = !mustIncludeToMediaIds.isEmpty();
+        boolean hasHardFilters = year != null || month != null || hasLocationFilter
+                || hasAnyMustInclude || hasPersonMatch || minPeople != null
+                || !anyOfResolved.isEmpty() || timeOfDay != null;
+
+        List<Media> candidates = new ArrayList<>();
+
+        for (Media media : allMedia) {
+            Long mediaId = media.getId();
+
+            if (negatedMediaIds.contains(mediaId)) continue;
+
+            if (year != null
+                    && (media.getDateTaken() == null || media.getDateTaken().getYear() != year)) continue;
+
+            if (month != null
+                    && (media.getDateTaken() == null || media.getDateTaken().getMonthValue() != month)) continue;
+
+            if (hasLocationFilter
+                    && (media.getLocation() == null || !matchedLocationStrings.contains(media.getLocation()))) continue;
+
+            if (hasAnyMustInclude) {
+                boolean allMet = true;
+                for (Set<Long> ids : mustIncludeToMediaIds.values()) {
+                    if (!ids.contains(mediaId)) { allMet = false; break; }
+                }
+                if (!allMet) continue;
+            }
+
+            if (!anyOfResolved.isEmpty()) {
+                boolean allGroupsSatisfied = true;
+                for (Map<String, Set<Long>> group : anyOfResolved) {
+                    boolean groupSatisfied = group.values().stream().anyMatch(ids -> ids.contains(mediaId));
+                    if (!groupSatisfied) { allGroupsSatisfied = false; break; }
+                }
+                if (!allGroupsSatisfied) continue;
+            }
+
+            if (hasPersonMatch && !personMediaIds.contains(mediaId)) continue;
+
+            if (minPeople != null
+                    && (media.getFaceCount() == null || media.getFaceCount() < minPeople)) continue;
+
+            if (timeOfDay != null && !timeOfDay.equalsIgnoreCase(media.getEventType())) continue;
+
+            candidates.add(media);
+        }
+
+        Map<Long, Double> rrfScores = new HashMap<>();
+        for (Media media : candidates) {
+            Long id = media.getId();
+            double score = 0.0;
+            if (clipRanks.containsKey(id)) score += 1.0 / (RRF_K + clipRanks.get(id));
+            if (textRanks.containsKey(id)) score += 1.0 / (RRF_K + textRanks.get(id));
+            rrfScores.put(id, score);
+        }
+
+        List<Media> filtered = candidates;
+        if (!hasHardFilters) {
+            filtered = candidates.stream()
+                    .filter(m -> rrfScores.getOrDefault(m.getId(), 0.0) > 0.0)
+                    .collect(Collectors.toList());
+        }
+
+        filtered.sort((a, b) -> Double.compare(
+                rrfScores.getOrDefault(b.getId(), 0.0),
+                rrfScores.getOrDefault(a.getId(), 0.0)
+        ));
+
+        System.out.println("Final results before refine: " + filtered.size() + " photos");
+        System.out.println("====================");
+
+        if (refine && !filtered.isEmpty()) {
+            filtered = applyVerificationRefine(query, filtered);
+        }
+
+        return filtered;
+    }
+
+    private List<Media> applyVerificationRefine(String query, List<Media> ranked) {
+        int topK = Math.min(REFINE_TOP_K, ranked.size());
+        List<Media> topCandidates = ranked.subList(0, topK);
+
+        Map<Long, String> descriptions = new HashMap<>();
+        for (Media m : topCandidates) {
+            if (m.getSceneCaption() != null) descriptions.put(m.getId(), m.getSceneCaption());
+        }
+
         try {
-            Map<Long, Double> semanticResults = semanticSearchClient.semanticSearch(query);
-            if (semanticResults != null) clipScores.putAll(semanticResults);
+            Set<Long> verifiedIds = verificationClient.verifyCandidates(query, descriptions);
+
+            List<Media> refined = new ArrayList<>();
+            for (Media m : topCandidates) {
+                if (verifiedIds.contains(m.getId())) refined.add(m);
+            }
+
+            for (int i = topK; i < ranked.size(); i++) refined.add(ranked.get(i));
+            return refined;
         } catch (Exception e) {
-            System.out.println("Semantic search failed: " + e.getMessage());
+            System.out.println("Verification refine failed, returning unrefined results: " + e.getMessage());
+            return ranked;
         }
+    }
 
-        // ── Hard filters ──────────────────────────────────────────────
-        Set<Long> hardExclude = new HashSet<>();
-
-        for (Media media : allMedia) {
-            Long mediaId = media.getId();
-
-            // 1. Negation
-            if (negatedMediaIds.contains(mediaId)) {
-                hardExclude.add(mediaId);
-                continue;
-            }
-
-            // 2. Year (dateTaken only)
-            if (year != null) {
-                if (media.getDateTaken() == null || media.getDateTaken().getYear() != year) {
-                    hardExclude.add(mediaId);
-                    continue;
-                }
-            }
-
-            // 3. Location — check against stored location string
-            if (requiredLocation != null) {
-                if (media.getLocation() == null || media.getLocation().isEmpty()) {
-                    hardExclude.add(mediaId);
-                    continue;
-                }
-                if (!media.getLocation().toLowerCase().contains(requiredLocation.toLowerCase())) {
-                    hardExclude.add(mediaId);
-                    continue;
-                }
-            }
-
-            // 4. Object AND filter — skip when person-name query
-            if (hasAnyObjectMatch && !hasPersonNameMatch) {
-                boolean allNounsMet = true;
-                for (Map.Entry<String, Set<Long>> entry : nounToMediaIds.entrySet()) {
-                    if (!entry.getValue().contains(mediaId)) {
-                        allNounsMet = false;
-                        break;
-                    }
-                }
-                if (!allNounsMet) { hardExclude.add(mediaId); continue; }
-            }
-
-            // 5. Person name hard filter
-            if (hasPersonNameMatch && !personNameMediaIds.contains(mediaId)) {
-                hardExclude.add(mediaId);
-                continue;
-            }
-
-            // 6. Face count
-            if (minFaces != null && media.getFaceCount() != null
-                    && media.getFaceCount() < minFaces) {
-                hardExclude.add(mediaId);
+    private Map<String, Set<Long>> resolveTagsToMediaIds(List<String> terms, List<String> allTagNames) {
+        Map<String, Set<Long>> result = new LinkedHashMap<>();
+        for (String term : terms) {
+            if (term == null || term.length() < 2) continue;
+            String resolvedTag = JaroWinklerUtil.bestMatch(term, allTagNames, FUZZY_THRESHOLD);
+            String lookupTerm = resolvedTag != null ? resolvedTag : term;
+            List<MediaObject> matches = mediaObjectRepository.findByObjectNameContainingIgnoreCase(lookupTerm);
+            if (!matches.isEmpty()) {
+                Set<Long> ids = new HashSet<>();
+                for (MediaObject obj : matches) ids.add(obj.getMedia().getId());
+                result.put(term, ids);
             }
         }
+        return result;
+    }
 
-        // ── Score candidates ──────────────────────────────────────────
-        Map<Long, Double> scoreMap = new HashMap<>();
-        for (Media media : allMedia) {
-            Long mediaId = media.getId();
-            if (hardExclude.contains(mediaId)) continue;
-            scoreMap.put(mediaId, clipScores.getOrDefault(mediaId, 0.0));
-        }
-
-        for (Long mediaId : new HashSet<>(scoreMap.keySet())) {
-            Media media = mediaMap.get(mediaId);
-            if (media == null) continue;
-            double score = scoreMap.get(mediaId);
-
-            // Person name — highest priority
-            if (hasPersonNameMatch && personNameMediaIds.contains(mediaId)) score += 3.0;
-
-            // Location match boost
-            if (requiredLocation != null) score += 1.5;
-
-            // Object match boosts
-            for (Map.Entry<String, Set<Long>> entry : nounToMediaIds.entrySet()) {
-                if (entry.getValue().contains(mediaId)) score += 0.6;
-            }
-
-            // Caption boosts
-            if (media.getSceneCaption() != null) {
-                String cap = media.getSceneCaption().toLowerCase();
-                for (String term : allTerms) {
-                    if (term.length() > 2 && cap.contains(term)) score += 0.4;
-                }
-                for (String verb : verbs) {
-                    if (cap.contains(verb)) score += 0.3;
-                }
-            }
-
-            // Temporal
-            if (year != null) score += 0.8;
-            if (month != null && media.getDateTaken() != null
-                    && media.getDateTaken().getMonthValue() == month) score += 0.5;
-
-            // Time of day
-            if (timeOfDay != null && timeOfDay.equalsIgnoreCase(media.getEventType())) score += 0.3;
-
-            // Face/people boost
-            boolean wantsPeople = nouns.stream().anyMatch(n ->
-                    n.equals("people") || n.equals("person") || n.equals("man")
-                            || n.equals("woman") || n.equals("family") || n.equals("friend")
-                            || n.equals("couple") || n.equals("group") || n.equals("crowd")
-                            || n.equals("child") || n.equals("kid") || n.equals("baby")
-                            || n.equals("men") || n.equals("women") || n.equals("boy") || n.equals("girl")
-            );
-            if (wantsPeople && media.getFaceCount() != null && media.getFaceCount() > 0) {
-                score += Math.min(media.getFaceCount() * 0.15, 0.6);
-            }
-
-            scoreMap.put(mediaId, score);
-        }
-
-        // ── Threshold ─────────────────────────────────────────────────
-        boolean hasHardFilters = year != null || requiredLocation != null
-                || hasAnyObjectMatch || hasPersonNameMatch;
-        double minThreshold;
-        if (hasHardFilters) {
-            minThreshold = 0.1;
-        } else {
-            long meaningfulTerms = allTerms.stream().filter(t -> t.length() > 3).count();
-            if (meaningfulTerms >= 3)      minThreshold = 0.8;
-            else if (meaningfulTerms == 2) minThreshold = 0.6;
-            else                           minThreshold = 0.4;
-        }
-
-        // ── Sort and return ───────────────────────────────────────────
-        List<Map.Entry<Long, Double>> sorted = new ArrayList<>(scoreMap.entrySet());
+    private Map<Long, Integer> toRankMap(Map<Long, Double> scores) {
+        List<Map.Entry<Long, Double>> sorted = new ArrayList<>(scores.entrySet());
         sorted.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
-
-        List<Media> results = new ArrayList<>();
+        Map<Long, Integer> ranks = new HashMap<>();
+        int rank = 1;
         for (Map.Entry<Long, Double> entry : sorted) {
-            if (entry.getValue() < minThreshold) continue;
-            mediaRepository.findById(entry.getKey())
-                    .filter(m -> "COMPLETED".equals(m.getStatus()))
-                    .ifPresent(results::add);
+            ranks.put(entry.getKey(), rank++);
         }
+        return ranks;
+    }
 
-        System.out.println("Final results: " + results.size() + " photos");
-        return results;
+    private Map<Long, Double> safeMap(Supplier<Map<Long, Double>> supplier) {
+        try {
+            Map<Long, Double> result = supplier.get();
+            return result != null ? result : Collections.emptyMap();
+        } catch (Exception e) {
+            System.out.println("Semantic search call failed: " + e.getMessage());
+            return Collections.emptyMap();
+        }
     }
 
     private List<String> safe(List<String> list) {

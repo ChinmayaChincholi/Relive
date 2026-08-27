@@ -22,5 +22,5 @@ def analyze(request: AnalyzeRequest):
         "face_count": result["face_count"],
         "time_of_day": result["time_of_day"],
         "date_taken": result["date_taken"],
-        "location": result["location"]
+        "location": result["location"],
     }

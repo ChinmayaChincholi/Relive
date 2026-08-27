@@ -26,8 +26,6 @@ public class MediaProcessingService {
     private final VisionClient visionClient;
     private final FaceService faceService;
 
-    // Self-injection so @Transactional proxy is in the call chain when
-    // analyzeAndSave is invoked from the async method.
     @Lazy
     @Autowired
     private MediaProcessingService self;
@@ -38,9 +36,6 @@ public class MediaProcessingService {
         if (success) {
             faceService.extractAndStoreFaces(mediaId, filePath);
             System.out.println("Face extraction done for media ID: " + mediaId);
-
-            // Cluster faces after every image so "Your People" stays up to date.
-            // clusterAndAssign() is a no-op if there are no new (unassigned) embeddings.
             faceService.clusterAndAssign();
             System.out.println("Face clustering done for media ID: " + mediaId);
         }
@@ -61,7 +56,6 @@ public class MediaProcessingService {
                     LocalDateTime dateTaken = LocalDateTime.parse(visionData.getDate_taken(), formatter);
                     media.setDateTaken(dateTaken);
                 } catch (Exception ignored) {
-                    // EXIF date format varies; silently skip unparseable values.
                 }
             }
 
@@ -73,7 +67,6 @@ public class MediaProcessingService {
             media.setFaceCount(visionData.getFace_count());
             media.setEventType(visionData.getTime_of_day());
 
-            // Replace any previous object tags for this media item.
             mediaObjectRepository.deleteByMedia(media);
 
             List<String> objects = visionData.getSemantic_objects();

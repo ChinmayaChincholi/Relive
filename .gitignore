@@ -1,11 +1,8 @@
-# ======================
 # Java / Spring Boot
-# ======================
 *.class
 *.log
 *.ctxt
 .mtj.tmp/
-
 *.jar
 *.war
 *.nar
@@ -13,27 +10,20 @@
 *.zip
 *.tar.gz
 *.rar
-
 hs_err_pid*
 replay_pid*
-
 target/
 
-# ======================
 # React / Node (Vite)
-# ======================
 node_modules/
 dist/
 .vite/
-
 .env
 .env.local
 .env.development
 .env.production
 
-# ======================
 # Python / FastAPI
-# ======================
 __pycache__/
 *.pyc
 *.pyo
@@ -42,43 +32,23 @@ __pycache__/
 # Ignore virtual environments anywhere
 venv/
 **/venv/
-project/**/venv/
 
-# ======================
-# Runtime / Generated Files
-# ======================
-uploads/
-coverage/
-build/
-
-# ======================
 # IDE Files
-# ======================
 .idea/
 .vscode/
 *.iml
 
-# ======================
 # OS Files
-# ======================
 .DS_Store
 Thumbs.db
 
-# ======================
 # FAISS index files
-# ======================
-relive-ai-service/vector.index
-relive-ai-service/vector_ids.pkl
+relive-ai-service/vector_image.index
+relive-ai-service/vector_image_ids.pkl
+relive-ai-service/vector_text.index
+relive-ai-service/vector_text_ids.pkl
 
-# ======================
-# Face crops (generated at runtime)
-# ======================
-relive-ai-service/face_crops/
-
-# ======================
-# Model weights (auto-downloaded on first run)
-# Keep yolov8n-face-lindevs.pt since it needs manual download
-# ======================
+# Model weights
 *.h5
-relive-ai-service/*.tflite
-relive-ai-service/yolov8n.pt
+*.gguf
+relive-ai-service/models/

@@ -51,9 +51,10 @@ public class MediaController {
 
     @GetMapping("/search-natural")
     public ApiResponse<List<MediaResponseDTO>> searchNatural(
-            @RequestParam String query
+            @RequestParam String query,
+            @RequestParam(required = false, defaultValue = "false") boolean refine
     ) {
-        List<MediaResponseDTO> results = mediaService.searchByNaturalQuery(query)
+        List<MediaResponseDTO> results = mediaService.searchByNaturalQuery(query, refine)
                 .stream()
                 .map(MediaMapper::toDTO)
                 .toList();
@@ -65,19 +66,12 @@ public class MediaController {
         return new ApiResponse<>(true, "Progress fetched", mediaService.getProgress());
     }
 
-    /**
-     * Delete a media item by ID (removes from DB and optionally from disk).
-     */
     @DeleteMapping("/{id}")
     public ApiResponse<String> deleteMedia(@PathVariable Long id) {
         mediaService.deleteMedia(id);
         return new ApiResponse<>(true, "Media deleted", null);
     }
 
-    /**
-     * Serves the raw image bytes for a given media ID.
-     * The stored path is absolute, so no path reconstruction is needed.
-     */
     @GetMapping("/image/{id}")
     public ResponseEntity<byte[]> getImage(@PathVariable Long id) throws IOException {
         String absolutePath = mediaService.getImagePath(id);

@@ -1,5 +1,3 @@
-import numpy as np
-import cv2
 from PIL.ExifTags import TAGS, GPSTAGS
 import reverse_geocoder as rg
 
@@ -14,15 +12,6 @@ def resize_image(image, max_size=640):
         return image.resize(new_size)
 
     return image
-
-
-def detect_day_night(image_pil):
-
-    image_np = np.array(image_pil)
-    hsv = cv2.cvtColor(image_np, cv2.COLOR_RGB2HSV)
-    brightness = hsv[:, :, 2].mean()
-
-    return "night" if brightness < 80 else "day"
 
 
 def extract_exif_date(image):
@@ -44,12 +33,6 @@ def extract_exif_date(image):
 
 
 def extract_exif_location(image):
-    """
-    Extracts GPS coordinates from EXIF and reverse geocodes to
-    a human-readable location string like 'Bengaluru, Karnataka, India'.
-    Returns None if no GPS data available.
-    """
-
     try:
         exif_data = image._getexif()
         if not exif_data:
@@ -82,7 +65,6 @@ def extract_exif_location(image):
         if gps_data.get("GPSLongitudeRef") == "W":
             lon = -lon
 
-        # Reverse geocode to human-readable location (fully offline)
         results = rg.search((lat, lon), mode=1)
 
         if results:
@@ -94,10 +76,8 @@ def extract_exif_location(image):
             parts = [p for p in [city, region, country] if p]
             location_str = ", ".join(parts)
 
-            # Also store raw coordinates alongside
             return f"{location_str} ({round(lat, 4)},{round(lon, 4)})"
 
-        # Fallback to raw coordinates if geocoding fails
         return f"{round(lat, 6)},{round(lon, 6)}"
 
     except Exception as e:

@@ -17,12 +17,6 @@ public class MediaStartupProcessor {
     private final MediaRepository mediaRepository;
     private final MediaProcessingService mediaProcessingService;
 
-    /**
-     * On startup, find any media items stuck in PROCESSING or FAILED state
-     * (e.g. due to a crash during a previous session) and re-queue them.
-     *
-     * filePath is now stored as an absolute path, so no reconstruction needed.
-     */
     @EventListener(ApplicationReadyEvent.class)
     public void reprocessUnfinishedMedia() {
         List<Media> unfinished = mediaRepository.findByStatusIn(List.of("PROCESSING", "FAILED"));

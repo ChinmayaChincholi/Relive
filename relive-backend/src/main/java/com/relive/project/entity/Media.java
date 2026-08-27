@@ -20,30 +20,26 @@ public class Media {
 
     private String fileName;
 
-    // Absolute path to the stored file on disk.
-    // Stored as absolute so it works regardless of working directory.
     private String filePath;
 
-    private String mediaType; // "IMAGE" or "VIDEO"
+    private String mediaType;
 
     private LocalDateTime uploadedAt;
 
     @Column(length = 3000)
     private String sceneCaption;
 
-    private String eventType; // "day" or "night"
+    private String eventType;
 
     private Integer faceCount;
 
     @Column(nullable = false)
-    private String status; // PROCESSING | COMPLETED | FAILED
+    private String status;
 
     @Column(nullable = false)
-    private String fileHash; // SHA-256 of file bytes — deduplication guard
+    private String fileHash;
 
-    // Full datetime from EXIF
     private LocalDateTime dateTaken;
 
-    // Human-readable location string from reverse geocoding, e.g. "Bengaluru, Karnataka, India"
     private String location;
 }

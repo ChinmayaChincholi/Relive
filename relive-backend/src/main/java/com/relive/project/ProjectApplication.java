@@ -12,7 +12,6 @@ public class ProjectApplication {
 
     public static void main(String[] args) {
 
-        // PRE-BOOTSTRAP: ensure directory exists BEFORE Spring starts
         String home = System.getProperty("user.home");
         Path reliveDir = Paths.get(home, ".relive");
 

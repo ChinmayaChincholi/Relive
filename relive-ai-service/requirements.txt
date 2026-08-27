@@ -1,22 +1,36 @@
 fastapi==0.110.0
 uvicorn==0.29.0
 
-ultralytics==8.2.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0
+torchvision==0.28.0
+accelerate==1.14.0
 
-torch==2.2.2
-transformers==4.37.2
-
-pillow==10.2.0
-opencv-python==4.9.0.80
 numpy==1.26.4
 
-spacy==3.7.4
+transformers==5.15.1
+sentence-transformers==3.0.1
+huggingface-hub==1.28.0
+tokenizers==0.22.2
+
+pillow==10.2.0
+
+opencv-python-headless==4.11.0.86
+
 pydantic==2.6.4
 
 faiss-cpu==1.8.0
 
-deepface==0.0.93
-tf-keras
-scikit-learn
-mediapipe
-reverse_geocoder
+rfdetr==1.9.3
+
+insightface==0.7.3
+onnxruntime==1.18.0
+
+hdbscan==0.8.44
+scikit-learn==1.9.0
+
+llama-cpp-python==0.3.35
+
+psutil==5.9.8
+
+reverse_geocoder==1.5.1

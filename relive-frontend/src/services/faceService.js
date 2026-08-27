@@ -29,9 +29,3 @@ export const deletePerson = async (personId) => {
   if (!res.data.success) throw new Error(res.data.message);
   return res.data;
 };
-
-export const reprocessAll = async () => {
-  const res = await api.post("/media/reprocess-all");
-  if (!res.data.success) throw new Error(res.data.message);
-  return res.data.message;
-};

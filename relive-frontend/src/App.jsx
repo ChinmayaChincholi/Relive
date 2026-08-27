@@ -3,6 +3,7 @@ import Home from './pages/Home';
 import Import from './pages/Import';
 import Ask from './pages/Ask';
 import Media from './pages/Media';
+import MediaDetail from './pages/MediaDetail';
 import Faces from './pages/Faces';
 import PersonPhotos from './pages/PersonPhotos';
 import MapPage from './pages/MapPage';
@@ -19,6 +20,7 @@ function App() {
         <Route path="/import"              element={<Import />} />
         <Route path="/ask"                 element={<Ask />} />
         <Route path="/media"               element={<Media />} />
+        <Route path="/media/:id"           element={<MediaDetail />} />
         <Route path="/faces"               element={<Faces />} />
         <Route path="/faces/person/:id"    element={<PersonPhotos />} />
         <Route path="/map"                 element={<MapPage />} />
