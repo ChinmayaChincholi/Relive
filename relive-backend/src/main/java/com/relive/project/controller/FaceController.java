@@ -72,7 +72,15 @@ public class FaceController {
 
     @GetMapping("/crop")
     public ResponseEntity<byte[]> getCrop(@RequestParam String path) throws IOException {
-        Path filePath = Paths.get(dataDir, path);
+        Path base = Paths.get(dataDir).normalize().toAbsolutePath();
+        Path filePath = base.resolve(path).normalize();
+
+        // Reject any path that resolves outside dataDir (e.g. via "../" segments)
+        // — this endpoint is unauthenticated, so it must not become an
+        // arbitrary-file-read endpoint.
+        if (!filePath.startsWith(base)) {
+            return ResponseEntity.badRequest().build();
+        }
 
         if (!Files.exists(filePath)) {
             System.out.println("Crop not found at: " + filePath.toAbsolutePath());

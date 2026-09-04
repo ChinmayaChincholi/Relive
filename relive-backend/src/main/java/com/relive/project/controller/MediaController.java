@@ -51,10 +51,9 @@ public class MediaController {
 
     @GetMapping("/search-natural")
     public ApiResponse<List<MediaResponseDTO>> searchNatural(
-            @RequestParam String query,
-            @RequestParam(required = false, defaultValue = "false") boolean refine
+            @RequestParam String query
     ) {
-        List<MediaResponseDTO> results = mediaService.searchByNaturalQuery(query, refine)
+        List<MediaResponseDTO> results = mediaService.searchByNaturalQuery(query)
                 .stream()
                 .map(MediaMapper::toDTO)
                 .toList();

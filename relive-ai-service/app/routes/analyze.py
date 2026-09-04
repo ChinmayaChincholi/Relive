@@ -13,14 +13,9 @@ class AnalyzeRequest(BaseModel):
 
 @router.post("/analyze")
 def analyze(request: AnalyzeRequest):
-
     result = analyze_image(request.image_path, request.media_id)
-
     return {
-        "caption": result["caption"],
-        "semantic_objects": result["semantic_objects"],
-        "face_count": result["face_count"],
-        "time_of_day": result["time_of_day"],
+        "vocabulary_words": result["vocabulary_words"],
         "date_taken": result["date_taken"],
         "location": result["location"],
     }

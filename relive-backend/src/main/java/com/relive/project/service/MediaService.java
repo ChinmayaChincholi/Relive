@@ -1,11 +1,10 @@
 package com.relive.project.service;
 
-import com.relive.project.client.VectorDeleteClient;
 import com.relive.project.entity.FaceEmbedding;
 import com.relive.project.entity.Media;
 import com.relive.project.repository.FaceEmbeddingRepository;
 import com.relive.project.repository.FacePersonRepository;
-import com.relive.project.repository.MediaObjectRepository;
+import com.relive.project.repository.MediaKeywordRepository;
 import com.relive.project.repository.MediaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -25,12 +24,11 @@ import java.util.stream.Collectors;
 public class MediaService {
 
     private final MediaUploadService mediaUploadService;
-    private final MediaSearchService mediaSearchService;
+    private final SearchService searchService;
     private final MediaRepository mediaRepository;
-    private final MediaObjectRepository mediaObjectRepository;
+    private final MediaKeywordRepository mediaKeywordRepository;
     private final FaceEmbeddingRepository faceEmbeddingRepository;
     private final FacePersonRepository facePersonRepository;
-    private final VectorDeleteClient vectorDeleteClient;
 
     public String uploadMedia(MultipartFile file) throws IOException {
         return mediaUploadService.uploadMedia(file);
@@ -41,10 +39,7 @@ public class MediaService {
     }
 
     public String uploadMultiple(List<MultipartFile> files) throws IOException {
-        for (MultipartFile file : files) {
-            mediaUploadService.uploadMedia(file);
-        }
-        return files.size() + " files uploaded. Processing started.";
+        return mediaUploadService.uploadMultiple(files);
     }
 
     public Map<String, Long> getProgress() {
@@ -61,11 +56,7 @@ public class MediaService {
     }
 
     public List<Media> searchByNaturalQuery(String query) {
-        return mediaSearchService.searchByNaturalQuery(query);
-    }
-
-    public List<Media> searchByNaturalQuery(String query, boolean refine) {
-        return mediaSearchService.searchByNaturalQuery(query, refine);
+        return searchService.searchByNaturalQuery(query);
     }
 
     public String getImagePath(Long id) {
@@ -96,13 +87,11 @@ public class MediaService {
             });
         }
 
-        mediaObjectRepository.deleteByMedia(media);
+        mediaKeywordRepository.deleteByMedia(media);
 
-        try {
-            vectorDeleteClient.deleteVectors(id);
-        } catch (Exception e) {
-            System.out.println("Failed to delete vectors for media " + id + ": " + e.getMessage());
-        }
+        // No AI-service call needed anymore — there's no external vector
+        // store; everything searchable lives in this database and is
+        // already removed above.
 
         if (media.getFilePath() != null) {
             try {

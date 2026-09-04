@@ -1,6 +1,6 @@
 package com.relive.project.client;
 
-import com.relive.project.dto.ParsedQueryResponse;
+import com.relive.project.dto.SearchExpression;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -18,24 +18,17 @@ public class QueryParserClient {
     @Value("${ai.service.url}")
     private String aiServiceUrl;
 
-    public ParsedQueryResponse parseQuery(String query) {
-
+    public SearchExpression parseQuery(String spellCorrectedQuery) {
         String url = aiServiceUrl + "/parse_query";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
-        Map<String, String> body = Map.of("query", query);
+        Map<String, String> body = Map.of("query", spellCorrectedQuery);
+        HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
 
-        HttpEntity<Map<String, String>> entity =
-                new HttpEntity<>(body, headers);
-
-        ResponseEntity<ParsedQueryResponse> response =
-                restTemplate.postForEntity(
-                        url,
-                        entity,
-                        ParsedQueryResponse.class
-                );
+        ResponseEntity<SearchExpression> response =
+                restTemplate.postForEntity(url, entity, SearchExpression.class);
 
         return response.getBody();
     }

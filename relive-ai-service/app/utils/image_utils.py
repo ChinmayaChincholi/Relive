@@ -33,6 +33,13 @@ def extract_exif_date(image):
 
 
 def extract_exif_location(image):
+    """
+    Returns a dict {city, region, country, display} or None — NOT a single
+    formatted string anymore. All three granularities get indexed as
+    separate LOCATION keywords by the backend, so "Bengaluru", "Karnataka",
+    and "IN" are all independently queryable, not just the full combined
+    string.
+    """
     try:
         exif_data = image._getexif()
         if not exif_data:
@@ -69,16 +76,19 @@ def extract_exif_location(image):
 
         if results:
             r = results[0]
-            city = r.get("name", "")
-            region = r.get("admin1", "")
-            country = r.get("cc", "")
+            city = r.get("name", "") or None
+            region = r.get("admin1", "") or None
+            country = r.get("cc", "") or None
 
             parts = [p for p in [city, region, country] if p]
-            location_str = ", ".join(parts)
+            display = ", ".join(parts) if parts else f"{round(lat, 6)},{round(lon, 6)}"
 
-            return f"{location_str} ({round(lat, 4)},{round(lon, 4)})"
+            return {"city": city, "region": region, "country": country, "display": display}
 
-        return f"{round(lat, 6)},{round(lon, 6)}"
+        # Reverse geocoding failed to resolve a place name — no queryable
+        # LOCATION keywords for this photo, but still worth a display string.
+        return {"city": None, "region": None, "country": None,
+                "display": f"{round(lat, 6)},{round(lon, 6)}"}
 
     except Exception as e:
         print(f"Location extraction error: {e}")

@@ -47,6 +47,18 @@ def cluster_faces(request: ClusterRequest):
     if not request.embeddings:
         return {"labels": []}
 
+    # HDBSCAN's underlying k-d tree query requires at least as many points
+    # as its k parameter (tied to min_samples) — with too few embeddings in
+    # the unnamed pool (e.g. right after the very first photo import, or a
+    # library with only a couple of faces overall), it throws a hard
+    # ValueError instead of just finding no clusters. Below that threshold,
+    # there's nothing meaningful for HDBSCAN to do anyway — every point is
+    # unclustered ("noise") by definition until there are enough similar
+    # points to group, so return that directly rather than calling HDBSCAN
+    # on data it can't handle.
+    if len(request.embeddings) <= FACE_CLUSTER_MIN_SAMPLES:
+        return {"labels": [-1] * len(request.embeddings)}
+
     embeddings = np.array(request.embeddings, dtype="float32")
 
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)

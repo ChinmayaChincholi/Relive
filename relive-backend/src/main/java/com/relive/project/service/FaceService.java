@@ -5,9 +5,12 @@ import com.relive.project.dto.FacePersonDTO;
 import com.relive.project.entity.*;
 import com.relive.project.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -20,8 +23,15 @@ public class FaceService {
     private final FacePersonRepository facePersonRepository;
     private final MediaRepository mediaRepository;
 
+    @Value("${relive.data.dir}")
+    private String dataDir;
 
-    public void extractAndStoreFaces(Long mediaId, String absoluteImagePath) {
+
+    /** Extracts faces and assigns each to a person via nearest-neighbor
+     *  matching — no longer triggers clustering itself; MediaUploadService
+     *  triggers clusterUnnamedPool() once per batch instead of once per
+     *  image. */
+    public void extractAndAssignFaces(Long mediaId, String absoluteImagePath) {
         try {
             Map<String, Object> response = faceClient.extractFaces(absoluteImagePath, mediaId);
             List<Map<String, Object>> faces = (List<Map<String, Object>>) response.get("faces");
@@ -31,7 +41,7 @@ public class FaceService {
             Media media = mediaRepository.findById(mediaId).orElseThrow();
 
             for (Map<String, Object> face : faces) {
-                String cropPath       = (String) face.get("crop_path");
+                String cropPathAbsolute = (String) face.get("crop_path");
                 List<Double> embedding = (List<Double>) face.get("embedding");
                 Double confidence = face.get("confidence") != null
                         ? ((Number) face.get("confidence")).doubleValue()
@@ -42,6 +52,8 @@ public class FaceService {
                 String embeddingCsv = embedding.stream()
                         .map(String::valueOf)
                         .collect(Collectors.joining(","));
+
+                String cropPath = relativizeToDataDir(cropPathAbsolute);
 
                 FaceEmbedding fe = FaceEmbedding.builder()
                         .cropPath(cropPath)
@@ -57,18 +69,39 @@ public class FaceService {
         }
     }
 
-
-    @Transactional
-    public void clusterAndAssign() {
+    /** The AI service returns an absolute filesystem path for each face
+     *  crop. FaceController's /crop endpoint deliberately expects a path
+     *  RELATIVE to dataDir (Paths.get(dataDir, path)) — this is a security
+     *  boundary, not an oversight: accepting an arbitrary absolute path
+     *  from the client would make that endpoint able to read any file on
+     *  disk. Store the relative form so the join in that controller
+     *  actually resolves to the real file. */
+    private String relativizeToDataDir(String absolutePath) {
         try {
-            List<FaceEmbedding> unassigned = faceEmbeddingRepository.findByPersonIsNull();
-            if (unassigned.isEmpty()) return; // nothing new — preserve existing state
+            return Paths.get(dataDir)
+                    .relativize(Paths.get(absolutePath))
+                    .toString();
+        } catch (Exception e) {
+            System.out.println("Could not relativize crop path: " + absolutePath + " — " + e.getMessage());
+            return absolutePath; // fallback — will still 404, but won't crash extraction
+        }
+    }
 
-            List<FaceEmbedding> allEmbeddings = faceEmbeddingRepository.findAll();
-            if (allEmbeddings.isEmpty()) return;
 
-            // Build embedding matrix for the clustering call
-            List<List<Double>> embeddingVectors = allEmbeddings.stream()
+    /** Renamed from clusterAndAssign. Only embeddings belonging to an
+     *  UNNAMED person are sent for re-clustering — named identities are
+     *  never included, so a periodic re-cluster can never silently
+     *  reshuffle, split, or merge an identity the user already confirmed. */
+    @Transactional
+    public void clusterUnnamedPool() {
+        try {
+            List<FaceEmbedding> unnamedPool = faceEmbeddingRepository.findAll().stream()
+                    .filter(fe -> fe.getPerson() == null || isUnnamed(fe.getPerson()))
+                    .collect(Collectors.toList());
+
+            if (unnamedPool.isEmpty()) return;
+
+            List<List<Double>> embeddingVectors = unnamedPool.stream()
                     .map(fe -> {
                         String[] parts = fe.getEmbeddingCsv().split(",");
                         List<Double> vec = new ArrayList<>();
@@ -79,7 +112,7 @@ public class FaceService {
 
             List<Integer> labels = faceClient.clusterFaces(embeddingVectors);
 
-            if (labels == null || labels.size() != allEmbeddings.size()) {
+            if (labels == null || labels.size() != unnamedPool.size()) {
                 System.out.println("Clustering returned unexpected label count. Skipping assignment.");
                 return;
             }
@@ -87,8 +120,8 @@ public class FaceService {
             Map<Integer, List<FaceEmbedding>> clusters = new HashMap<>();
             for (int i = 0; i < labels.size(); i++) {
                 int label = labels.get(i);
-                if (label == -1) continue;
-                clusters.computeIfAbsent(label, k -> new ArrayList<>()).add(allEmbeddings.get(i));
+                if (label == -1) continue; // HDBSCAN noise — leave ungrouped for now
+                clusters.computeIfAbsent(label, k -> new ArrayList<>()).add(unnamedPool.get(i));
             }
 
             Map<Integer, FacePerson> clusterToExistingPerson = new HashMap<>();
@@ -105,10 +138,8 @@ public class FaceService {
                 int clusterLabel = entry.getKey();
                 List<FaceEmbedding> clusterEmbeddings = entry.getValue();
 
-                FacePerson person;
-                if (clusterToExistingPerson.containsKey(clusterLabel)) {
-                    person = clusterToExistingPerson.get(clusterLabel);
-                } else {
+                FacePerson person = clusterToExistingPerson.get(clusterLabel);
+                if (person == null) {
                     person = FacePerson.builder().name(null).build();
                     facePersonRepository.save(person);
                 }
@@ -121,17 +152,21 @@ public class FaceService {
 
             List<FacePerson> allPersons = facePersonRepository.findAll();
             for (FacePerson person : allPersons) {
-                if (faceEmbeddingRepository.findByPerson(person).isEmpty()) {
+                if (isUnnamed(person) && faceEmbeddingRepository.findByPerson(person).isEmpty()) {
                     facePersonRepository.delete(person);
                 }
             }
 
-            System.out.println("Clustering complete. Clusters: " + clusters.size());
+            System.out.println("Unnamed-pool clustering complete. Clusters: " + clusters.size());
 
         } catch (Exception e) {
             System.out.println("Face clustering failed: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    private boolean isUnnamed(FacePerson person) {
+        return person.getName() == null || person.getName().isBlank();
     }
 
     public List<FacePersonDTO> getPeople() {

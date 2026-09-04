@@ -1,38 +1,93 @@
-from app.hardware import Tier, cpu_ram_tier, gpu_tier
+from app.hardware import Tier, describe as describe_hardware
 
+# ---------------------------------------------------------------------------
+# VISION model — image processing step 9 (22-category vocabulary generation).
+# Qwen2.5-VL specifically, because it's the newest Qwen-VL family with
+# OFFICIAL support in llama-cpp-python 0.3.35 (Qwen25VLChatHandler, added
+# upstream). Qwen3.5/3.6-VL vision support only exists in a third-party fork
+# as of this build — not used here to avoid depending on an unofficial fork.
+# ---------------------------------------------------------------------------
 VLM_MODEL_BY_TIER = {
-    Tier.LOW:  "vikhyatk/moondream2",
-    Tier.MID:  "Qwen/Qwen2-VL-2B-Instruct",
-    Tier.HIGH: "Qwen/Qwen2-VL-7B-Instruct",
+    Tier.LOW:  "Qwen2.5-VL-3B",
+    Tier.MID:  "Qwen2.5-VL-7B",
+    Tier.HIGH: "Qwen2.5-VL-72B",
 }
-VLM_MAX_NEW_TOKENS = 400
+VLM_REPO_BY_MODEL = {
+    "Qwen2.5-VL-3B":  "unsloth/Qwen2.5-VL-3B-Instruct-GGUF",
+    "Qwen2.5-VL-7B":  "unsloth/Qwen2.5-VL-7B-Instruct-GGUF",
+    "Qwen2.5-VL-72B": "unsloth/Qwen2.5-VL-72B-Instruct-GGUF",
+}
+VLM_GGUF_FILE_BY_MODEL = {
+    "Qwen2.5-VL-3B":  "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+    "Qwen2.5-VL-7B":  "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+    "Qwen2.5-VL-72B": "Qwen2.5-VL-72B-Instruct-Q4_K_M.gguf",
+}
+# Pinned to one exact file instead of a "*mmproj*.gguf" wildcard — each repo
+# ships THREE mmproj variants (BF16/F16/F32), which made the wildcard
+# ambiguous and crashed loading. F16 is the standard middle-ground choice.
+VLM_MMPROJ_FILE_BY_MODEL = {
+    "Qwen2.5-VL-3B":  "mmproj-F16.gguf",
+    "Qwen2.5-VL-7B":  "mmproj-F16.gguf",
+    "Qwen2.5-VL-72B": "mmproj-F16.gguf",
+}
+VLM_CONTEXT_WINDOW = 8192
+VLM_MAX_NEW_TOKENS_VOCAB = 2500
 
-CLIP_MODEL_BY_TIER = {
-    Tier.LOW:  "openai/clip-vit-base-patch32",
-    Tier.MID:  "openai/clip-vit-base-patch32",
-    Tier.HIGH: "openai/clip-vit-large-patch14",
+# ---------------------------------------------------------------------------
+# TEXT-ONLY model — image retrieval step 2 (query -> expression tree) and
+# image processing step 10 (synonym generation, text-only, no image needed).
+# Qwen3.5/3.6, used in plain text mode (no chat_handler) — this part never
+# depended on Qwen3-VL vision support, so it's unaffected by the fork issue
+# that pushed the vision model above to Qwen2.5-VL instead.
+# ---------------------------------------------------------------------------
+LLM_MODEL_BY_TIER = {
+    Tier.LOW:  "Qwen3.5-4B",
+    Tier.MID:  "Qwen3.5-9B",
+    Tier.HIGH: "Qwen3.6-27B",
 }
+LLM_REPO_BY_MODEL = {
+    "Qwen3.5-4B":  "unsloth/Qwen3.5-4B-GGUF",
+    "Qwen3.5-9B":  "unsloth/Qwen3.5-9B-GGUF",
+    "Qwen3.6-27B": "unsloth/Qwen3.6-27B-GGUF",
+}
+# NOTE: these are still wildcards and may hit the exact same "multiple files
+# matched" crash the VLM glob just hit — waiting on your file listing for
+# these three repos (see previous message) to pin them to exact filenames
+# the same way. Try running it; if it crashes, paste the "Available Files"
+# list here the same way you did for the VLM repos and I'll pin these too.
+LLM_GGUF_FILE_BY_MODEL = {
+    "Qwen3.5-4B":  "*Q4_K_M.gguf",
+    "Qwen3.5-9B":  "*Q4_K_M.gguf",
+    "Qwen3.6-27B": "*Q4_K_M.gguf",
+}
+LLM_CONTEXT_WINDOW = 8192
+LLM_MAX_NEW_TOKENS_SYNONYMS = 400
+LLM_MAX_NEW_TOKENS_QUERY = 300
 
-TEXT_EMBEDDING_MODEL_BY_TIER = {
-    Tier.LOW:  "BAAI/bge-small-en-v1.5",
-    Tier.MID:  "BAAI/bge-base-en-v1.5",
-    Tier.HIGH: "BAAI/bge-large-en-v1.5",
+# ---------------------------------------------------------------------------
+# Object detection fallback (image processing step 12) — RF-DETR (Apache 2.0)
+# for LOW/MID, D-FINE-X (MIT) for HIGH.
+# ---------------------------------------------------------------------------
+OBJECT_DETECTION_FAMILY_BY_TIER = {
+    Tier.LOW:  "rfdetr",
+    Tier.MID:  "rfdetr",
+    Tier.HIGH: "dfine",
 }
-TEXT_EMBEDDING_DIM_BY_TIER = {
-    Tier.LOW: 384,
-    Tier.MID: 768,
-    Tier.HIGH: 1024,
-}
-
 OBJECT_DETECTION_MODEL_BY_TIER = {
     Tier.LOW:  "rfdetr-nano",
-    Tier.MID:  "rfdetr-medium",
-    Tier.HIGH: "rfdetr-large",
+    Tier.MID:  "rfdetr-large",
+    Tier.HIGH: "dfine-xlarge",
+}
+D_FINE_HF_REPO_BY_MODEL = {
+    "dfine-xlarge": "ustc-community/dfine_x_coco",
+    "dfine-large":  "ustc-community/dfine-large-coco",
 }
 OBJECT_DETECTION_CONFIDENCE = 0.4
 
-OBJECT_DETECTION_ALLOW_PML_XL = False
-
+# ---------------------------------------------------------------------------
+# Face detection / recognition — unchanged, InsightFace remains best-in-class
+# for offline use.
+# ---------------------------------------------------------------------------
 FACE_MODEL_PACK_BY_TIER = {
     Tier.LOW:  "buffalo_s",
     Tier.MID:  "buffalo_l",
@@ -46,29 +101,9 @@ FACE_CLUSTER_MIN_CLUSTER_SIZE = 2
 FACE_CLUSTER_MIN_SAMPLES = 1
 FACE_CLUSTER_METRIC = "euclidean"
 
-QUERY_LLM_MODEL_BY_TIER = {
-    Tier.LOW:  "Qwen3.5-4B-Q4_K_M.gguf",
-    Tier.MID:  "Qwen3.5-9B-Q4_K_M.gguf",
-    Tier.HIGH: "Qwen3.8-27B-Instruct-Q4_K_M.gguf",
-}
-QUERY_LLM_CONTEXT_WINDOW = 4096
-QUERY_LLM_MAX_NEW_TOKENS = 512
-
-QUERY_LLM_APPROX_GB_BY_TIER = {
-    Tier.LOW: 3.0,
-    Tier.MID: 6.0,
-    Tier.HIGH: 17.0,
-}
-
-QUERY_VERIFICATION_DEFAULT_ENABLED = False
-QUERY_VERIFICATION_TOP_K = 30
-
-SEMANTIC_SEARCH_TOP_K = 50
-SEMANTIC_SEARCH_MIN_SCORE = 0.15
-
-VLM_TIER = gpu_tier()
-CLIP_TIER = gpu_tier()
-TEXT_EMBEDDING_TIER = cpu_ram_tier()
-OBJECT_DETECTION_TIER = gpu_tier()
-FACE_TIER = gpu_tier()
-QUERY_LLM_TIER = cpu_ram_tier()
+# ---------------------------------------------------------------------------
+# Hardware tiers are informational only. Every model loader always ATTEMPTS
+# the HIGH tier first regardless of what tier detection guesses, and only
+# steps down on an actual load failure.
+# ---------------------------------------------------------------------------
+print(f"[config] Detected hardware (informational only): {describe_hardware()}")

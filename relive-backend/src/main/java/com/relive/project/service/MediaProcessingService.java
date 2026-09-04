@@ -1,11 +1,12 @@
 package com.relive.project.service;
 
-import com.relive.project.client.VisionClient;
-import com.relive.project.dto.VisionResponse;
+import com.relive.project.client.VocabularyClient;
+import com.relive.project.entity.Domain;
 import com.relive.project.entity.Media;
-import com.relive.project.entity.MediaObject;
-import com.relive.project.repository.MediaObjectRepository;
+import com.relive.project.entity.MediaKeyword;
+import com.relive.project.repository.MediaKeywordRepository;
 import com.relive.project.repository.MediaRepository;
+import com.relive.project.util.LemmatizerUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
@@ -16,29 +17,31 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
 public class MediaProcessingService {
 
     private final MediaRepository mediaRepository;
-    private final MediaObjectRepository mediaObjectRepository;
-    private final VisionClient visionClient;
+    private final MediaKeywordRepository mediaKeywordRepository;
+    private final VocabularyClient vocabularyClient;
     private final FaceService faceService;
 
     @Lazy
     @Autowired
     private MediaProcessingService self;
 
+    /** Returns a Future so callers (MediaUploadService) can wait for a whole
+     *  batch to finish before triggering face re-clustering and the spelling
+     *  dictionary rebuild once, instead of per image. */
     @Async("taskExecutor")
-    public void processMedia(Long mediaId, String filePath) {
+    public CompletableFuture<Void> processMedia(Long mediaId, String filePath) {
         boolean success = self.analyzeAndSave(mediaId, filePath);
         if (success) {
-            faceService.extractAndStoreFaces(mediaId, filePath);
-            System.out.println("Face extraction done for media ID: " + mediaId);
-            faceService.clusterAndAssign();
-            System.out.println("Face clustering done for media ID: " + mediaId);
+            faceService.extractAndAssignFaces(mediaId, filePath);
         }
+        return CompletableFuture.completedFuture(null);
     }
 
     @Transactional
@@ -46,39 +49,35 @@ public class MediaProcessingService {
         try {
             System.out.println("Processing media ID: " + mediaId);
 
-            VisionResponse visionData = visionClient.analyzeImage(filePath, mediaId);
+            VocabularyClient.AnalyzeResult analysis = vocabularyClient.analyzeImage(filePath, mediaId);
 
             Media media = mediaRepository.findById(mediaId).orElseThrow();
 
-            if (visionData.getDate_taken() != null) {
+            if (analysis.dateTaken != null) {
                 try {
                     DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss");
-                    LocalDateTime dateTaken = LocalDateTime.parse(visionData.getDate_taken(), formatter);
-                    media.setDateTaken(dateTaken);
+                    media.setDateTaken(LocalDateTime.parse(analysis.dateTaken, formatter));
                 } catch (Exception ignored) {
                 }
             }
 
-            if (visionData.getLocation() != null) {
-                media.setLocation(visionData.getLocation());
+            media.setLocation(analysis.locationDisplay); // display-only convenience field
+
+            mediaKeywordRepository.deleteByMedia(media);
+
+            // VOCAB keywords (already lemmatized on the Python side; re-lemmatize
+            // here too as a safety net in case a word slipped through unnormalized).
+            for (String word : analysis.vocabularyWords) {
+                String key = LemmatizerUtil.lemmatize(word);
+                if (key.isBlank()) continue;
+                mediaKeywordRepository.save(MediaKeyword.builder()
+                        .keyword(key).domain(Domain.VOCAB).media(media).build());
             }
 
-            media.setSceneCaption(visionData.getCaption());
-            media.setFaceCount(visionData.getFace_count());
-            media.setEventType(visionData.getTime_of_day());
-
-            mediaObjectRepository.deleteByMedia(media);
-
-            List<String> objects = visionData.getSemantic_objects();
-            if (objects != null) {
-                for (String obj : objects) {
-                    MediaObject mediaObject = MediaObject.builder()
-                            .objectName(obj.toLowerCase())
-                            .media(media)
-                            .build();
-                    mediaObjectRepository.save(mediaObject);
-                }
-            }
+            // LOCATION keywords — 3 separate granularities per §6 of the design doc.
+            saveLocationKeyword(media, analysis.locationCity);
+            saveLocationKeyword(media, analysis.locationRegion);
+            saveLocationKeyword(media, analysis.locationCountry);
 
             media.setStatus("COMPLETED");
             mediaRepository.save(media);
@@ -95,5 +94,11 @@ public class MediaProcessingService {
             });
             return false;
         }
+    }
+
+    private void saveLocationKeyword(Media media, String value) {
+        if (value == null || value.isBlank()) return;
+        mediaKeywordRepository.save(MediaKeyword.builder()
+                .keyword(value.toLowerCase().trim()).domain(Domain.LOCATION).media(media).build());
     }
 }
