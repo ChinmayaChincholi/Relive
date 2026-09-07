@@ -136,7 +136,7 @@ VOCABULARY_CATEGORIES = [
     {
         "name": "Image Style & Composition",
         "scope": "The way the image itself is presented or composed, not its subject matter.",
-        "includes": "photograph, black and white, cartoon, aerial view, close-up, portrait, landscape orientation, vintage, pixelated, macro shot, panoramic, blurry, high-contrast, HDR, selfie, screenshot",
+        "includes": "photo, photograph, picture, image, snapshot, black and white, cartoon, aerial view, close-up, portrait, landscape orientation, vintage, pixelated, macro shot, panoramic, blurry, high-contrast, HDR, selfie, screenshot, print, film, frame",
         "excludes": "",
     },
 ]

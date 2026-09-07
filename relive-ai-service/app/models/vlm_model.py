@@ -3,7 +3,7 @@ Vision model — Qwen2.5-VL, used only for image processing step 9 (22-category
 vocabulary generation). See app/models/llm_model.py for the separate
 text-only model (query parsing, synonym generation).
 
-All 22 categories are now sent in ONE call (one image encoding) rather than
+All 22 categories are sent in ONE call (one image encoding) rather than
 22 separate calls — confirmed via logs that llama-cpp-python's
 create_chat_completion fully re-encodes the image on every separate call
 regardless of shared conversation history, so splitting into multiple calls
@@ -11,6 +11,30 @@ bought us nothing but 22x the encoding cost. Each category gets a required
 "scratchpad" reasoning field before its word list, inside the same JSON
 grammar, to push the model past just restating the example words given for
 each category.
+
+Word-count fix: the JSON schema deliberately does NOT put a minItems floor
+on each category's "words" array. A schema-level minimum would force the
+model to hallucinate filler words for categories that genuinely don't apply
+to a given image. Instead, exhaustiveness is pushed for via the prompt
+itself (explicit "do not stop early" instructions) plus non-greedy sampling
+(temperature/top_p/repeat_penalty below) — greedy decoding (temperature=0)
+reliably converges on the shortest valid answer per category, since nothing
+in a schema-only constraint pushes the model to keep enumerating once it's
+produced something plausible. max_tokens is also computed dynamically per
+call (mirroring the pattern in llm_model.py's generate_synonyms) instead of
+a single flat constant, so the output budget scales with how much room is
+actually left in the context window.
+
+NOTE: an earlier revision added 3 category-specific content rules here
+(banning relationship-guessing in People, capping Colors/Materials to
+common names, dropping generic words from Image Style). Those have been
+rolled back on purpose — they were reactive patches derived from one image
+and risked being wrong or irrelevant for the millions of other images this
+will process. Redundant/non-discriminative/occasionally-hallucinated words
+are treated as tolerable noise for now, not something to chase with more
+hand-written category rules; word-quality work is focused on the one thing
+that isn't tolerable (fabricated/non-existent words), which is a
+lemmatization problem, not a prompting problem — see app/utils/lemmatizer.py.
 
 Loading starts at the DETECTED hardware tier and steps down only on an
 actual load failure.
@@ -31,7 +55,12 @@ from app.config import (
     VLM_GGUF_FILE_BY_MODEL,
     VLM_MMPROJ_FILE_BY_MODEL,
     VLM_CONTEXT_WINDOW,
-    VLM_MAX_NEW_TOKENS_VOCAB,
+    VLM_VOCAB_MIN_TOKENS,
+    VLM_IMAGE_TOKEN_RESERVE,
+    VLM_TOKEN_SAFETY_MARGIN,
+    VLM_VOCAB_TEMPERATURE,
+    VLM_VOCAB_TOP_P,
+    VLM_VOCAB_REPEAT_PENALTY,
 )
 from app.hardware import Tier, gpu_tier, describe as describe_hardware
 from app.services.vocabulary_categories import VOCABULARY_CATEGORIES
@@ -86,6 +115,12 @@ _NUM_CATEGORIES = len(VOCABULARY_CATEGORIES)
 # to keep this a flat (non-recursive) schema that from_json_schema handles
 # fine (the earlier grammar bug was specific to genuinely self-referential
 # $ref trees, not fixed-length arrays like this one).
+#
+# Deliberately NO minItems on "words": a schema-level minimum can't tell the
+# difference between "the model gave up early" and "this category genuinely
+# doesn't apply to this image" — forcing a minimum would make the model
+# hallucinate filler words in the second case. Exhaustiveness is pushed for
+# through the prompt and sampling parameters instead (see below).
 _VOCAB_SCHEMA = {
     "type": "object",
     "properties": {
@@ -122,6 +157,10 @@ Critical rules:
 - Only include a word if it can genuinely be used to describe something actually visible in the image.
   Never hallucinate or guess.
 - Look thoroughly — do not miss something small or partially visible.
+- There is NO upper limit on how many words a category can have. If ten, twenty, or more words genuinely
+  apply to a category, list all of them. Producing too FEW words for a category that clearly has more to
+  say is a much bigger mistake than producing too many — do not stop after just one or two words if more
+  genuinely visible things fit. Only give a short list if that is genuinely all there is to say.
 - If nothing in a category applies, its scratchpad should say so briefly and "words" should be an empty list.
 - Use singular, lowercase, simple word forms (e.g. "ship" not "ships", "child" not "children").
 - Never include a person's proper name in any category.
@@ -150,11 +189,35 @@ def _image_to_data_uri(image: Image.Image) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+def _compute_max_tokens(text_prompt: str) -> int:
+    """Dynamic output budget, mirroring the pattern in llm_model.py's
+    generate_synonyms(). We can only tokenize the TEXT portion of the prompt
+    directly (Llama.tokenize() is text-only) — the image consumes a separate,
+    variable number of vision tokens depending on resolution/tiling that we
+    can't measure this way, so VLM_IMAGE_TOKEN_RESERVE stands in as a
+    conservative reserve for that (sized for images already capped by
+    resize_image()). VLM_VOCAB_MIN_TOKENS is a floor so the budget never gets
+    suspiciously small even if these estimates are off in the wrong direction."""
+    full_text_for_count = _VOCAB_SYSTEM_PROMPT + text_prompt
+    text_token_count = len(_llm.tokenize(full_text_for_count.encode("utf-8")))
+
+    return max(
+        VLM_VOCAB_MIN_TOKENS,
+        VLM_CONTEXT_WINDOW - text_token_count - VLM_IMAGE_TOKEN_RESERVE - VLM_TOKEN_SAFETY_MARGIN,
+        )
+
+
 def generate_vocabulary(image: Image.Image) -> list[str]:
     """Takes an already-processed PIL Image (RGB, resized) — NOT a file path.
     Single call, single image encode, all 22 categories addressed with a
-    per-category reasoning scratchpad inside the constrained JSON output."""
+    per-category reasoning scratchpad inside the constrained JSON output.
+    Sampling is non-greedy (temperature > 0) specifically for this call —
+    exhaustive enumeration benefits from it far more than query parsing or
+    synonym generation do, which stay deterministic."""
     image_data_uri = _image_to_data_uri(image)
+    text_prompt = f"Categories:\n\n{_CATEGORIES_BLOCK}"
+
+    max_tokens = _compute_max_tokens(text_prompt)
 
     messages = [
         {"role": "system", "content": _VOCAB_SYSTEM_PROMPT},
@@ -162,7 +225,7 @@ def generate_vocabulary(image: Image.Image) -> list[str]:
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": image_data_uri}},
-                {"type": "text", "text": f"Categories:\n\n{_CATEGORIES_BLOCK}"},
+                {"type": "text", "text": text_prompt},
             ],
         },
     ]
@@ -170,8 +233,10 @@ def generate_vocabulary(image: Image.Image) -> list[str]:
     completion = _llm.create_chat_completion(
         messages=messages,
         grammar=_vocab_grammar,
-        max_tokens=VLM_MAX_NEW_TOKENS_VOCAB,
-        temperature=0.0,
+        max_tokens=max_tokens,
+        temperature=VLM_VOCAB_TEMPERATURE,
+        top_p=VLM_VOCAB_TOP_P,
+        repeat_penalty=VLM_VOCAB_REPEAT_PENALTY,
     )
     raw_text = completion["choices"][0]["message"]["content"]
 

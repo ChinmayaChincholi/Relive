@@ -21,6 +21,7 @@ from app.config import (
     LLM_CONTEXT_WINDOW,
     LLM_MAX_NEW_TOKENS_SYNONYMS,
     LLM_MAX_NEW_TOKENS_QUERY,
+    LLM_SYNONYM_SAFETY_MARGIN,
 )
 from app.hardware import Tier, cpu_ram_tier, describe as describe_hardware
 
@@ -68,8 +69,7 @@ def _load_with_fallback():
 _llm = _load_with_fallback()
 
 # ---------------------------------------------------------------------------
-# Synonym-generation grammar — flat schema, from_json_schema works fine here
-# (the KeyError only ever showed up on the recursive Expression schema below).
+# Synonym-generation grammar — flat schema, from_json_schema works fine here.
 # ---------------------------------------------------------------------------
 _SYNONYM_SCHEMA = {
     "type": "object",
@@ -91,43 +91,62 @@ _SYNONYM_SCHEMA = {
 _synonym_grammar = LlamaGrammar.from_json_schema(json.dumps(_SYNONYM_SCHEMA))
 
 # ---------------------------------------------------------------------------
-# Query expression tree grammar — hand-written GBNF instead of
-# from_json_schema. The $defs/$ref-based JSON Schema approach hit a real bug
-# in this llama-cpp-python version's ref resolver (KeyError on a nested
-# $ref that isn't the top-level one — Expression resolved, the nested
-# TermLeaf ref inside it didn't). GBNF supports genuine recursive rules
-# natively (a rule can reference itself), so writing the grammar directly
-# sidesteps the broken converter entirely rather than working around it.
+# Query expression tree grammar — JSON Schema, fully inlined (no $ref), 3
+# real levels of must/should/must_not nesting then a forced leaf at level 4.
+# See prior revisions' history for why: a hand-written GBNF via
+# LlamaGrammar.from_string() crashed natively 3 times running, so this uses
+# LlamaGrammar.from_json_schema() instead — the code path already proven
+# reliable for the vocabulary/synonym grammars — with the same bounded-depth
+# structure expressed as inlined nested dicts.
 # ---------------------------------------------------------------------------
-_EXPRESSION_GBNF = r'''
-root ::= ws expression ws
 
-expression ::= "{" ws
-  "\"term\"" ws ":" ws term-or-null ws "," ws
-  "\"must\"" ws ":" ws expr-array ws "," ws
-  "\"should\"" ws ":" ws expr-array ws "," ws
-  "\"must_not\"" ws ":" ws expr-array ws
-"}"
+_TERM_LEAF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "domain": {"type": "string", "enum": ["PERSON", "LOCATION", "DATE", "TIME", "VOCAB"]},
+        "value": {"type": "string"},
+        "range_end": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+    },
+    "required": ["domain", "value", "range_end"],
+}
 
-expr-array ::= "[" ws (expression (ws "," ws expression)*)? ws "]"
+_TERM_OR_NULL_SCHEMA = {"anyOf": [_TERM_LEAF_SCHEMA, {"type": "null"}]}
 
-term-or-null ::= term-leaf | "null"
 
-term-leaf ::= "{" ws
-  "\"domain\"" ws ":" ws domain-string ws "," ws
-  "\"value\"" ws ":" ws json-string ws "," ws
-  "\"range_end\"" ws ":" ws range-end ws
-"}"
+def _leaf_level_expression_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "term": _TERM_OR_NULL_SCHEMA,
+            "must": {"type": "array", "maxItems": 0},
+            "should": {"type": "array", "maxItems": 0},
+            "must_not": {"type": "array", "maxItems": 0},
+        },
+        "required": ["term", "must", "should", "must_not"],
+    }
 
-domain-string ::= "\"PERSON\"" | "\"LOCATION\"" | "\"DATE\"" | "\"TIME\"" | "\"VOCAB\""
 
-range-end ::= json-string | "null"
+def _expression_level_schema(child_schema: dict) -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "term": _TERM_OR_NULL_SCHEMA,
+            "must": {"type": "array", "items": child_schema},
+            "should": {"type": "array", "items": child_schema},
+            "must_not": {"type": "array", "items": child_schema},
+        },
+        "required": ["term", "must", "should", "must_not"],
+    }
 
-json-string ::= "\"" ( [^"\\\x7F\x00-\x1F] | "\\" (["\\bfnrt] | "u" [0-9a-fA-F]{4}) )* "\""
 
-ws ::= [ \t\n]*
-'''
-_expression_grammar = LlamaGrammar.from_string(_EXPRESSION_GBNF)
+_EXPRESSION_SCHEMA = _expression_level_schema(
+    _expression_level_schema(
+        _expression_level_schema(
+            _leaf_level_expression_schema()
+        )
+    )
+)
+_expression_grammar = LlamaGrammar.from_json_schema(json.dumps(_EXPRESSION_SCHEMA))
 
 # ---------------------------------------------------------------------------
 # Job 2 — synonym / related-word expansion (import time, text-only, batched)
@@ -148,12 +167,12 @@ Rules:
 
 
 def generate_synonyms(words: list[str]) -> dict[str, list[str]]:
-    """One batched call for all words from one image, not one call per word.
-    max_tokens is computed from the ACTUAL remaining context window space
-    after the real prompt, not a guessed per-word multiplier — two guessed
-    multipliers in a row (400, then 80/word) both still truncated on a
-    large-enough vocabulary, so this removes the guessing entirely: tokenize
-    the real prompt, use whatever's left."""
+    if not words:
+        return {}
+    return _generate_synonyms_batch(words)
+
+
+def _generate_synonyms_batch(words: list[str]) -> dict[str, list[str]]:
     if not words:
         return {}
 
@@ -163,19 +182,23 @@ def generate_synonyms(words: list[str]) -> dict[str, list[str]]:
     full_prompt_text = _SYNONYM_SYSTEM_PROMPT + prompt
     prompt_token_count = len(_llm.tokenize(full_prompt_text.encode("utf-8")))
 
-    safety_margin = 100  # headroom for chat-template formatting overhead
-    max_tokens = max(500, LLM_CONTEXT_WINDOW - prompt_token_count - safety_margin)
+    max_tokens = max(500, LLM_CONTEXT_WINDOW - prompt_token_count - LLM_SYNONYM_SAFETY_MARGIN)
 
-    completion = _llm.create_chat_completion(
-        messages=[
-            {"role": "system", "content": _SYNONYM_SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        grammar=_synonym_grammar,
-        max_tokens=max_tokens,
-        temperature=0.0,
-    )
-    raw_text = completion["choices"][0]["message"]["content"]
+    try:
+        completion = _llm.create_chat_completion(
+            messages=[
+                {"role": "system", "content": _SYNONYM_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            grammar=_synonym_grammar,
+            max_tokens=max_tokens,
+            temperature=0.0,
+        )
+        raw_text = completion["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"[llm_model] Synonym generation call failed for a batch of "
+              f"{len(words)} word(s): {e} — retrying with smaller batch(es).")
+        return _retry_split(words)
 
     try:
         parsed = json.loads(raw_text)
@@ -187,8 +210,24 @@ def generate_synonyms(words: list[str]) -> dict[str, list[str]]:
                 result[word] = related
         return result
     except Exception as e:
-        print(f"[llm_model] Synonym parse failed: {e}")
+        print(f"[llm_model] Synonym parse failed for a batch of {len(words)} "
+              f"word(s): {e} — retrying with smaller batch(es).")
+        return _retry_split(words)
+
+
+def _retry_split(words: list[str]) -> dict[str, list[str]]:
+    if len(words) <= 1:
+        if words:
+            print(f"[llm_model] Giving up on synonym generation for a single "
+                  f"word that still failed on its own: {words[0]!r}")
         return {}
+
+    mid = len(words) // 2
+    left = _generate_synonyms_batch(words[:mid])
+    right = _generate_synonyms_batch(words[mid:])
+    merged = dict(left)
+    merged.update(right)
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -199,15 +238,60 @@ _QUERY_SYSTEM_PROMPT = """You are a query parser for a personal photo search eng
 been spell-corrected. Parse it into a recursive boolean expression tree.
 
 Schema: an Expression has "term" (set only on leaf nodes) OR one or more of "must"/"should"/"must_not"
-(lists of child Expressions; empty list if unused). A leaf's "term" has:
-- domain: PERSON (a person's name — including relationship words used AS a name, e.g. "mom", "dad"
-  ARE VOCAB not PERSON unless clearly a proper name), LOCATION, DATE, TIME, or VOCAB (anything else
-  that helps describe the image — objects, activities, moods, events, etc).
-- value: the term itself. For DATE use "DD-MM-YYYY". For TIME use 24-hour "HH:MM".
-- range_end: set only when this term is a range (e.g. a date/time range); null otherwise.
+(lists of child Expressions; empty list if unused). A leaf's "term" has "domain", "value", and "range_end".
+
+GENERAL PRINCIPLE for choosing a domain: PERSON, LOCATION, DATE, and TIME are each for one SPECIFIC,
+LITERAL thing — a specific named individual, a specific named place, a specific calendar date/range, or a
+specific clock time/range. A general CATEGORY or TYPE of any of these (a role instead of a name, a kind of
+place instead of a place name, a visual impression instead of a literal date or clock time) is always
+VOCAB instead, even when the word itself sounds related to one of the other domains.
+
+- PERSON: a specific individual's actual name. Relationship or role words used loosely (e.g. "mom", "dad",
+  "bride", "groom", "graduate", "teacher", "the birthday boy") are NOT names of a specific person the
+  system can look up — they are VOCAB, describing a category of person, not an identity. Only use PERSON
+  when the query clearly names one specific person.
+
+- LOCATION: ONLY a specific NAMED real-world place — a city, region/state, or country name (e.g. "Paris",
+  "California", "Japan", "Tokyo") — matched against place names derived from each photo's GPS location.
+  Generic TYPES or categories of place are VOCAB, not LOCATION, even though they sound place-related — for
+  example: beach, park, forest, mountain, lake, river, restaurant, office, kitchen, backyard, stadium,
+  market, city street, countryside. Only an actual proper place NAME is LOCATION; a category of place is
+  always VOCAB.
+
+- DATE: ONLY the calendar date a PHOTO ITSELF was taken, as literally recorded with the photo (format
+  "DD-MM-YYYY", using "range_end" for a range). Never infer a date from an event name or context — e.g.
+  "wedding" is a VOCAB event term, not a DATE; do not guess what date someone's wedding happened on. Use
+  DATE only when the query directly references a calendar date, month, year, or an explicit date range.
+
+- TIME: ONLY the literal clock time-of-day a photo was taken, as recorded with the photo (24-hour
+  "HH:MM", using "range_end" for a range). Prefer TIME (over VOCAB) for words that describe WHEN in the
+  day something happened and clearly map to a clock window — "morning", "afternoon", "evening", "night" —
+  since the query is really asking about capture time. Do NOT use TIME for purely visual/lighting
+  descriptions like "sunset", "sunrise", "dawn", "dusk", "golden hour", or "starry sky" — these describe
+  how a photo visually LOOKS (assigned by looking at the image), not a literal clock reading, and the
+  system has no way to compute a clock-time window for them — these stay VOCAB.
+
+- VOCAB: the default domain for everything else that describes what a photo shows or how it looks —
+  objects, animals, plants, actions, activities, emotions, colors, materials, shapes, events and
+  occasions, abstract themes, generic categories of person/place (see above), and visual/lighting
+  descriptors that aren't a literal clock time (see above). When in doubt between VOCAB and a more specific
+  domain, VOCAB is the safer default — the more specific domains are only for a literal, unambiguous name,
+  place, date, or clock time.
 
 must = AND (every child must match). should = OR (at least one child must match). must_not = NOT
 (none of these children may match).
+
+The tree can nest at most 3 levels deep: the root's children may themselves have must/should/must_not
+children, and THOSE children may too, but that third level must be plain leaf terms only (no further
+nesting). This is far more than any realistic photo search query needs — if a query somehow seems to call
+for deeper nesting than this, simplify the logical structure to the closest reasonable fit within 3 levels
+rather than trying to express it exactly.
+
+IMPORTANT — keep output as SHORT as correctly possible: if a single term is all a query needs, set "term"
+directly on the top-level object and leave "must"/"should"/"must_not" as empty arrays — do NOT wrap a
+single term inside an unnecessary "must"/"should" array containing one nested object. Only use nested
+must/should/must_not when the query genuinely has more than one condition to combine. Unnecessary nesting
+wastes output length for no benefit.
 
 Word-form rule: normalize VOCAB terms toward their base singular form when generating "value" (e.g.
 "ships" -> "ship") — downstream lookup handles exact word-form matching separately, your job is just
@@ -223,24 +307,56 @@ range cannot be constructed.
 
 Always return valid JSON matching the schema exactly. Never include commentary."""
 
+_FALLBACK_STOPWORDS = {
+    "a", "an", "the", "of", "in", "on", "at", "and", "or", "but", "not",
+    "photo", "photos", "picture", "pictures", "image", "images", "pic", "pics",
+    "me", "my", "give", "show", "find", "with", "from", "for", "to",
+}
+
+
+def _fallback_expression(query: str) -> dict:
+    words = [w for w in query.strip().lower().split() if w and w not in _FALLBACK_STOPWORDS]
+    if not words:
+        words = [query.strip().lower()]
+
+    return {
+        "term": None,
+        "must": [],
+        "should": [
+            {"term": {"domain": "VOCAB", "value": w, "range_end": None},
+             "must": [], "should": [], "must_not": []}
+            for w in words
+        ],
+        "must_not": [],
+    }
+
 
 def parse_query(query: str) -> dict:
+    full_prompt_text = _QUERY_SYSTEM_PROMPT + query
+    prompt_token_count = len(_llm.tokenize(full_prompt_text.encode("utf-8")))
+    max_tokens = max(500, LLM_CONTEXT_WINDOW - prompt_token_count - LLM_SYNONYM_SAFETY_MARGIN)
+
     completion = _llm.create_chat_completion(
         messages=[
             {"role": "system", "content": _QUERY_SYSTEM_PROMPT},
             {"role": "user", "content": query},
         ],
         grammar=_expression_grammar,
-        max_tokens=LLM_MAX_NEW_TOKENS_QUERY,
+        max_tokens=max_tokens,
         temperature=0.0,
     )
     raw_text = completion["choices"][0]["message"]["content"]
 
     try:
-        return json.loads(raw_text)
+        parsed = json.loads(raw_text)
+        # Debug visibility: this used to only print on a PARSE FAILURE, which
+        # is useless for diagnosing a case like "beach" vs "sea" — a
+        # successful-but-wrong parse (e.g. Qwen classifying "beach" as
+        # LOCATION instead of VOCAB) produced no signal at all before this.
+        # Every query's actual parsed tree now prints here so a
+        # misclassification is directly visible instead of having to guess.
+        print(f"[llm_model] Parsed query {query!r} -> {json.dumps(parsed)}")
+        return parsed
     except Exception as e:
-        print(f"[llm_model] Query parse failed, falling back to a single VOCAB term: {e}")
-        return {
-            "term": {"domain": "VOCAB", "value": query.strip().lower(), "range_end": None},
-            "must": [], "should": [], "must_not": [],
-        }
+        print(f"[llm_model] Query parse failed: {e} — falling back to a per-word OR match.")
+        return _fallback_expression(query)

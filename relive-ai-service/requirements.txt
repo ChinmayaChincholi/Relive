@@ -31,3 +31,5 @@ llama-cpp-python==0.3.35
 psutil==5.9.8
 
 reverse_geocoder==1.5.1
+
+simplemma==2.0.0

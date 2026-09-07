@@ -6,7 +6,6 @@ import com.relive.project.entity.Media;
 import com.relive.project.entity.MediaKeyword;
 import com.relive.project.repository.MediaKeywordRepository;
 import com.relive.project.repository.MediaRepository;
-import com.relive.project.util.LemmatizerUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
@@ -65,10 +64,16 @@ public class MediaProcessingService {
 
             mediaKeywordRepository.deleteByMedia(media);
 
-            // VOCAB keywords (already lemmatized on the Python side; re-lemmatize
-            // here too as a safety net in case a word slipped through unnormalized).
+            // VOCAB keywords — already lemmatized on the Python side (see
+            // app/services/image_pipeline.py). NOT re-lemmatized here anymore:
+            // running the same lossy heuristic a second time was compounding
+            // its mistakes rather than acting as a harmless safety net (e.g.
+            // "pleased" -> Python -> "pleas" -> Java re-lemmatize -> "plea").
+            // A plain trim/lowercase is still applied as a cheap normalization
+            // safety net in case a word ever slips through with stray casing
+            // or whitespace.
             for (String word : analysis.vocabularyWords) {
-                String key = LemmatizerUtil.lemmatize(word);
+                String key = word.trim().toLowerCase();
                 if (key.isBlank()) continue;
                 mediaKeywordRepository.save(MediaKeyword.builder()
                         .keyword(key).domain(Domain.VOCAB).media(media).build());

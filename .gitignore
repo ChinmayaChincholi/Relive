@@ -42,12 +42,6 @@ venv/
 .DS_Store
 Thumbs.db
 
-# FAISS index files
-relive-ai-service/vector_image.index
-relive-ai-service/vector_image_ids.pkl
-relive-ai-service/vector_text.index
-relive-ai-service/vector_text_ids.pkl
-
 # Model weights
 *.h5
 *.gguf

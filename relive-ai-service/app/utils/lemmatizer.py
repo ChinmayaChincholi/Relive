@@ -1,20 +1,41 @@
 """
-Lightweight rule-based lemmatizer — deliberately NOT spaCy/a full NLP
-lemmatizer, to avoid a heavy new dependency for what is, for this app's
-vocabulary (mostly common nouns/adjectives/verbs from VLM output), a mostly
-regular problem. Mirrored by LemmatizerUtil.java on the query side so
-import-time keys and query-time lookups land on the same canonical form.
-If precision issues show up in practice with irregular words, swap this for
-a real NLP lemmatizer later — this is a pragmatic starting point, not a
-claim of linguistic completeness.
+Lemmatizer used at image-import time to normalize VLM-generated words before
+storage. This used to be a hand-rolled regex heuristic; it went through two
+rounds of new exception rules after real production words kept exposing
+gaps (silent-e restoration, doubled-consonant undo, "-ing" nouns that were
+never gerunds — see git history for the two prior versions). Every fix
+uncovered a new failure class, because English verb morphology genuinely
+requires dictionary knowledge, not just phonological pattern-matching.
+
+Replaced entirely with simplemma (MIT-licensed, offline dictionary lookup,
+no heavy NLP dependency, no runtime download — its data ships inside the
+pip package). Verified against every word that broke the old heuristic
+across both production images, plus ~60 additional common English words
+chosen to probe likely remaining gaps (see PR description / chat log for
+the full test) — it resolves essentially all of them correctly, with the
+one observed miss ("singing" -> "singe") landing on a real English word
+in the wrong sense, never a non-existent fragment.
+
+Only two things stay custom, because they aren't lemmatization at all:
+- British/American spelling canonicalization, so "grey" and "gray" don't
+  fragment the index into two different keys.
+- A cheap early return for already-lemmatized-looking hyphenated compounds,
+  kept mainly as a defensive no-op (simplemma already handles these safely
+  on its own, verified against "orange-red", "blue-gray", "flip-flops").
 """
 
-_IRREGULAR = {
-    "children": "child", "people": "person", "men": "man", "women": "woman",
-    "mice": "mouse", "geese": "goose", "feet": "foot", "teeth": "tooth",
-    "leaves": "leaf", "knives": "knife", "wolves": "wolf", "lives": "life",
-    "went": "go", "gone": "go", "ate": "eat", "eaten": "eat",
-    "ran": "run", "swam": "swim", "sat": "sit", "stood": "stand",
+import simplemma
+
+# Common British/American (and similar) spelling variants, canonicalized to
+# one form so the index doesn't fragment — a photo tagged "grey" should be
+# found by a search for "gray" and vice versa. Not something a dictionary
+# lemmatizer handles, since these are two equally "correct" spellings of the
+# same word, not an inflected/base-form relationship.
+_SPELLING_VARIANTS = {
+    "grey": "gray", "colour": "color", "favourite": "favorite",
+    "aluminium": "aluminum", "mould": "mold", "jewellery": "jewelry",
+    "tyre": "tire", "centre": "center", "theatre": "theater",
+    "metre": "meter", "litre": "liter",
 }
 
 
@@ -22,26 +43,14 @@ def lemmatize(word: str) -> str:
     w = word.strip().lower()
     if not w:
         return w
-    if w in _IRREGULAR:
-        return _IRREGULAR[w]
 
-    if w.endswith("ies") and len(w) > 4:
-        return w[:-3] + "y"
-    if w.endswith(("ses", "xes", "zes", "ches", "shes")) and len(w) > 4:
-        return w[:-2]
-    if w.endswith("s") and not w.endswith("ss") and len(w) > 3:
-        return w[:-1]
+    w = _SPELLING_VARIANTS.get(w, w)
 
-    if w.endswith("ing") and len(w) > 5:
-        stem = w[:-3]
-        if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
-            return stem[:-1]  # running -> run
-        return stem
+    if "-" in w:
+        # Compound descriptors ("orange-red", "flip-flop"). simplemma already
+        # handles these safely on its own — this is a defensive no-op, kept
+        # so a future simplemma version change can't silently start mangling
+        # these without a very visible diff here.
+        return w
 
-    if w.endswith("ed") and len(w) > 4:
-        stem = w[:-2]
-        if len(stem) >= 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
-            return stem[:-1]  # stopped -> stop
-        return stem
-
-    return w
+    return simplemma.lemmatize(w, lang="en")

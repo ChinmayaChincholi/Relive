@@ -104,7 +104,7 @@ public class SearchService {
             case "LOCATION":
                 return lookupKeyword(Domain.LOCATION, term.getValue().toLowerCase());
             case "VOCAB":
-                return lookupKeyword(Domain.VOCAB, LemmatizerUtil.lemmatize(term.getValue()));
+                return lookupVocab(term.getValue());
             case "DATE":
                 return lookupDate(term.getValue(), term.getRangeEnd());
             case "TIME":
@@ -119,6 +119,27 @@ public class SearchService {
         String resolved = JaroWinklerUtil.bestMatch(value, allNames, FUZZY_THRESHOLD);
         if (resolved == null) return Collections.emptySet();
         return new HashSet<>(faceService.getMediaIdsForPersonExact(resolved));
+    }
+
+    /**
+     * VOCAB lookup, previously a single call to LemmatizerUtil.lemmatize()
+     * followed by one exact-match query. Now tries each candidate form (see
+     * LemmatizerUtil.candidateForms — most-likely-correct first) against the
+     * real stored keyword index, and uses the first one that actually has
+     * matches. The database (populated only by the correctly-lemmatized
+     * Python output) is the source of truth for "is this a real stored
+     * word" — Java is no longer deciding that on its own. Falls through to
+     * the existing fuzzy match only if none of the candidates hit anything,
+     * exactly as before.
+     */
+    private Set<Long> lookupVocab(String rawValue) {
+        for (String candidate : LemmatizerUtil.candidateForms(rawValue)) {
+            List<MediaKeyword> exact = mediaKeywordRepository.findByDomainAndKeyword(Domain.VOCAB, candidate);
+            if (!exact.isEmpty()) {
+                return exact.stream().map(k -> k.getMedia().getId()).collect(Collectors.toSet());
+            }
+        }
+        return lookupKeyword(Domain.VOCAB, LemmatizerUtil.normalize(rawValue));
     }
 
     private Set<Long> lookupKeyword(Domain domain, String value) {
