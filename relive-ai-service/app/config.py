@@ -68,7 +68,6 @@ VLM_TOKEN_SAFETY_MARGIN = 150
 # this is the one job where exhaustiveness matters more than determinism.
 VLM_VOCAB_TEMPERATURE = 0.6
 VLM_VOCAB_TOP_P = 0.9
-VLM_VOCAB_REPEAT_PENALTY = 1.15
 
 # ---------------------------------------------------------------------------
 # TEXT-ONLY model — image retrieval step 2 (query -> expression tree) and

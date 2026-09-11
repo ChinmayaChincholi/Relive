@@ -6,6 +6,7 @@ import com.relive.project.repository.FaceEmbeddingRepository;
 import com.relive.project.repository.FacePersonRepository;
 import com.relive.project.repository.MediaKeywordRepository;
 import com.relive.project.repository.MediaRepository;
+import com.relive.project.repository.LocationRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +30,7 @@ public class MediaService {
     private final MediaKeywordRepository mediaKeywordRepository;
     private final FaceEmbeddingRepository faceEmbeddingRepository;
     private final FacePersonRepository facePersonRepository;
+    private final LocationRepository locationRepository;
 
     public String uploadMedia(MultipartFile file) throws IOException {
         return mediaUploadService.uploadMedia(file);
@@ -88,6 +90,7 @@ public class MediaService {
         }
 
         mediaKeywordRepository.deleteByMedia(media);
+        locationRepository.deleteByMedia(media);
 
         // No AI-service call needed anymore — there's no external vector
         // store; everything searchable lives in this database and is

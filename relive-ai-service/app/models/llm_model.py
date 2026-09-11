@@ -224,15 +224,6 @@ def _generate_synonyms_batch(words: list[str]) -> dict[str, list[str]]:
                 grammar=_synonym_grammar,
                 max_tokens=max_tokens,
                 temperature=0.0,
-                # Confirmed repetition-loop evidence: a real (successful)
-                # batch still produced ['trousers', 'slacks', 'jeans',
-                # 'leggings', 'shorts', 'capris', 'leggings', 'sweatpants',
-                # 'leggings', 'leggings'] — the same word repeated 4 times
-                # in a 10-item list. repeat_penalty discourages the model
-                # from re-emitting recently-generated tokens, targeting this
-                # tendency at its source rather than only capping the
-                # damage after the fact.
-                repeat_penalty=1.2,
             )
         raw_text = completion["choices"][0]["message"]["content"]
     except Exception as e:

@@ -68,7 +68,6 @@ from app.config import (
     VLM_TOKEN_SAFETY_MARGIN,
     VLM_VOCAB_TEMPERATURE,
     VLM_VOCAB_TOP_P,
-    VLM_VOCAB_REPEAT_PENALTY,
 )
 from app.hardware import Tier, gpu_tier, describe as describe_hardware
 from app.services.vocabulary_categories import VOCABULARY_CATEGORIES
@@ -130,7 +129,15 @@ _VOCAB_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "scratchpad": {"type": "string"},
-                    "words": {"type": "array", "items": {"type": "string"}},
+                    "words": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 40,  # generous backstop only — not expected to bind;
+                        # prevents a runaway loop from ever eating the
+                        # whole token budget now that repeat_penalty
+                        # (which was also functioning as an accidental
+                        # brake) is being removed below.
+                    },
                 },
                 "required": ["scratchpad", "words"],
             },
@@ -141,7 +148,7 @@ _VOCAB_SCHEMA = {
 _vocab_grammar = LlamaGrammar.from_json_schema(json.dumps(_VOCAB_SCHEMA))
 
 _VOCAB_SYSTEM_PROMPT = """You are an exhaustive visual vocabulary extractor for a personal photo search engine.
-You will be given one image and a numbered list of 22 categories. For EACH category, in order, produce:
+You will be given one image and a numbered list of 21 categories. For EACH category, in order, produce:
 - "scratchpad": a short free-text note where you actually look at the image and think through what, if
   anything, in this specific category is genuinely visible — do this BEFORE deciding the word list. Do not
   skip this step or leave it a placeholder; use it to actually reason, since this is what catches things
@@ -162,7 +169,7 @@ Critical rules:
 - If nothing in a category applies, its scratchpad should say so briefly and "words" should be an empty list.
 - Use singular, lowercase, simple word forms (e.g. "ship" not "ships", "child" not "children").
 - Never include a person's proper name in any category.
-- Return exactly 22 entries in "categories", in the same order the categories are given below."""
+- Return exactly 21 entries in "categories", in the same order the categories are given below."""
 
 
 def _build_categories_block() -> str:
@@ -221,7 +228,6 @@ def generate_vocabulary(image: Image.Image) -> list[str]:
             max_tokens=max_tokens,
             temperature=VLM_VOCAB_TEMPERATURE,
             top_p=VLM_VOCAB_TOP_P,
-            repeat_penalty=VLM_VOCAB_REPEAT_PENALTY,
         )
     raw_text = completion["choices"][0]["message"]["content"]
 
