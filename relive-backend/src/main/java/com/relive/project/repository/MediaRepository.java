@@ -21,10 +21,8 @@ public interface MediaRepository extends JpaRepository<Media, Long> {
 
     List<Media> findByDateTakenBetween(LocalDateTime start, LocalDateTime end);
 
-    // Matches on time-of-day only, across any date — dateTaken already
-    // stores both, so this extracts just the HH:MM part via SQLite's
-    // strftime rather than needing a separate Time treemap/table.
     @Query(value = "SELECT id FROM media WHERE date_taken IS NOT NULL " +
-            "AND strftime('%H:%M', date_taken) BETWEEN :start AND :end", nativeQuery = true)
+            "AND strftime('%H:%M', date_taken / 1000, 'unixepoch', 'localtime') BETWEEN :start AND :end",
+            nativeQuery = true)
     List<Long> findIdsByTimeOfDayBetween(@Param("start") String start, @Param("end") String end);
 }

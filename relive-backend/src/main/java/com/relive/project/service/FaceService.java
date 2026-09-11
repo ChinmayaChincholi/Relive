@@ -33,37 +33,39 @@ public class FaceService {
      *  image. */
     public void extractAndAssignFaces(Long mediaId, String absoluteImagePath) {
         try {
+            long extractStart = System.nanoTime();
             Map<String, Object> response = faceClient.extractFaces(absoluteImagePath, mediaId);
             List<Map<String, Object>> faces = (List<Map<String, Object>>) response.get("faces");
+            double extractElapsed = (System.nanoTime() - extractStart) / 1_000_000_000.0;
+            System.out.printf("[FaceService] media_id=%d step=extractFaces (AI service call) face_count=%d took=%.3fs%n",
+                    mediaId, faces == null ? 0 : faces.size(), extractElapsed);
 
             if (faces == null || faces.isEmpty()) return;
-
             Media media = mediaRepository.findById(mediaId).orElseThrow();
 
+            long assignStart = System.nanoTime();
             for (Map<String, Object> face : faces) {
                 String cropPathAbsolute = (String) face.get("crop_path");
                 List<Double> embedding = (List<Double>) face.get("embedding");
                 Double confidence = face.get("confidence") != null
                         ? ((Number) face.get("confidence")).doubleValue()
                         : 1.0;
-
                 if (embedding == null || embedding.isEmpty()) continue;
-
                 String embeddingCsv = embedding.stream()
                         .map(String::valueOf)
                         .collect(Collectors.joining(","));
-
                 String cropPath = relativizeToDataDir(cropPathAbsolute);
-
                 FaceEmbedding fe = FaceEmbedding.builder()
                         .cropPath(cropPath)
                         .embeddingCsv(embeddingCsv)
                         .confidence(confidence)
                         .media(media)
                         .build();
-
                 assignOrCreatePerson(fe);
             }
+            double assignElapsed = (System.nanoTime() - assignStart) / 1_000_000_000.0;
+            System.out.printf("[FaceService] media_id=%d step=assignOrCreatePerson (%d faces) took=%.3fs%n",
+                    mediaId, faces.size(), assignElapsed);
         } catch (Exception e) {
             System.out.println("Face extraction failed for media " + mediaId + ": " + e.getMessage());
         }

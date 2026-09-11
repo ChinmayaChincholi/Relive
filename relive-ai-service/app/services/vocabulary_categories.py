@@ -1,11 +1,16 @@
 """
-The 22-category vocabulary ontology used to prompt Qwen at image-import time.
-Each category becomes one separate prompt (see app/models/qwen_model.py ->
+The 21-category vocabulary ontology used to prompt Qwen at image-import time.
+Each category becomes one separate prompt (see app/models/vlm_model.py ->
 generate_vocabulary). Category text is taken directly from the locked design
 spec — scope/includes/examples are reproduced deliberately so the prompts
 match what was agreed, not a paraphrase that could drift over time.
-"""
 
+Change: "Image Style & Composition" was removed (used to be category #21 of
+22). Its "includes" list (photo, photograph, picture, image, snapshot, etc.)
+was mostly generating generic, non-searchable noise words rather than
+anything a user would actually type into search — every photo is a "photo",
+so tagging it as one added no retrieval value.
+"""
 VOCABULARY_CATEGORIES = [
     {
         "name": "People & Human Entities",
@@ -133,12 +138,5 @@ VOCABULARY_CATEGORIES = [
         "includes": "sunny, rainy, night, sunset, snowy, cloudy, foggy, stormy, morning, afternoon, evening, dawn, dusk, sunrise, winter, summer (only if visually obvious)",
         "excludes": "",
     },
-    {
-        "name": "Image Style & Composition",
-        "scope": "The way the image itself is presented or composed, not its subject matter.",
-        "includes": "photo, photograph, picture, image, snapshot, black and white, cartoon, aerial view, close-up, portrait, landscape orientation, vintage, pixelated, macro shot, panoramic, blurry, high-contrast, HDR, selfie, screenshot, print, film, frame",
-        "excludes": "",
-    },
 ]
-
-assert len(VOCABULARY_CATEGORIES) == 22
+assert len(VOCABULARY_CATEGORIES) == 21

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List
 import numpy as np
 import hdbscan
+import time
 
 from app.config import (
     FACE_CLUSTER_MIN_CLUSTER_SIZE,
@@ -26,9 +27,10 @@ class ClusterRequest(BaseModel):
 
 @router.post("/extract_faces")
 def extract_faces(request: FaceExtractionRequest):
-
+    start = time.perf_counter()
     faces = extract_faces_from_image(request.image_path)
-
+    print(f"[faces] media_id={request.media_id} step=extract_faces "
+          f"face_count={len(faces)} took={time.perf_counter() - start:.3f}s")
     return {
         "media_id": request.media_id,
         "faces": [

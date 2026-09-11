@@ -11,6 +11,22 @@ public class SymSpellUtil {
 
     private static final int MAX_EDIT_DISTANCE = 2;
 
+    // Common English function words (articles, conjunctions, prepositions)
+    // that should never be run through dictionary correction at all. This is
+    // a closed, well-defined grammatical class, not a content judgment call
+    // — confirmed bug: every one of these was getting silently rewritten
+    // into an unrelated stored keyword ("of" -> "sofa", "and" -> "sand",
+    // "or" -> "form", "but" -> "big", "not" -> "noon") because a 2-3 letter
+    // word is within edit-distance 2 of a huge fraction of similarly-short
+    // dictionary words. Mirrors llm_model.py's _FALLBACK_STOPWORDS on the
+    // AI-service side — kept in sync manually since they're separate
+    // languages/services; if one changes, check the other.
+    private static final Set<String> STOPWORDS = Set.of(
+            "a", "an", "the", "of", "in", "on", "at", "and", "or", "but", "not",
+            "photo", "photos", "picture", "pictures", "image", "images", "pic", "pics",
+            "me", "my", "give", "show", "find", "with", "from", "for", "to"
+    );
+
     private final Map<String, List<String>> deletionIndex = new HashMap<>();
     private final Set<String> dictionary = new HashSet<>();
 
@@ -29,16 +45,27 @@ public class SymSpellUtil {
     }
 
     /** Returns the best correction for a single word, or the word unchanged if
-     *  it's already in the dictionary or no correction is found within
-     *  MAX_EDIT_DISTANCE. */
+     *  it's already in the dictionary, a stopword, or no correction is found
+     *  within the (length-aware) max edit distance. */
     public String correct(String word) {
         String w = word.trim().toLowerCase();
-        if (w.isEmpty() || dictionary.contains(w)) return w;
+        if (w.isEmpty() || dictionary.contains(w) || STOPWORDS.contains(w)) return w;
+
+        // Length-aware distance cap, as defense in depth beyond the fixed
+        // stopword list above: a stopword list can only ever cover a known,
+        // closed set of words, but the same over-correction risk applies to
+        // ANY short word not in that list (a genuinely short vocab word, a
+        // short mistyped name, etc.) — for a word this short, allowing 2
+        // edits relative to its own length is close to meaningless, since
+        // it can differ in most of its letters and still "match". Longer
+        // words keep the full distance-2 tolerance, where it's actually a
+        // meaningful signal of a real typo rather than noise.
+        int maxDistance = (w.length() <= 3) ? 1 : MAX_EDIT_DISTANCE;
 
         Set<String> candidates = new HashSet<>();
         if (deletionIndex.containsKey(w)) candidates.addAll(deletionIndex.get(w));
 
-        for (String deletion : generateDeletions(w, MAX_EDIT_DISTANCE)) {
+        for (String deletion : generateDeletions(w, maxDistance)) {
             if (dictionary.contains(deletion)) candidates.add(deletion);
             if (deletionIndex.containsKey(deletion)) candidates.addAll(deletionIndex.get(deletion));
         }
@@ -54,7 +81,7 @@ public class SymSpellUtil {
                 best = candidate;
             }
         }
-        return (best != null && bestDistance <= MAX_EDIT_DISTANCE) ? best : w;
+        return (best != null && bestDistance <= maxDistance) ? best : w;
     }
 
     /** Correct every whitespace-separated token in a query independently. */
@@ -64,11 +91,19 @@ public class SymSpellUtil {
         for (int i = 0; i < tokens.length; i++) {
             if (i > 0) result.append(" ");
             String token = tokens[i];
-            String stripped = token.replaceAll("[^a-zA-Z]", "");
-            if (stripped.isEmpty()) {
-                result.append(token);
+            // Only correct a token that is ENTIRELY letters. A token mixing
+            // letters with digits/punctuation (an ordinal like "3rd", a
+            // hyphenated word, etc.) can't be safely corrected by
+            // substituting back a letters-only candidate — that silently
+            // discards the non-letter characters. Confirmed bug: "3rd" was
+            // being corrected as "rd" and the "3" vanished, corrupting date
+            // queries like "3rd June 2023" into unparseable text. Any token
+            // that isn't purely letters is left completely untouched, exactly
+            // like a purely-numeric token ("2023") already was.
+            if (token.matches("[a-zA-Z]+")) {
+                result.append(correct(token));
             } else {
-                result.append(correct(stripped));
+                result.append(token);
             }
         }
         return result.toString();

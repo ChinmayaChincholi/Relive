@@ -53,10 +53,15 @@ public class MediaController {
     public ApiResponse<List<MediaResponseDTO>> searchNatural(
             @RequestParam String query
     ) {
-        List<MediaResponseDTO> results = mediaService.searchByNaturalQuery(query)
-                .stream()
-                .map(MediaMapper::toDTO)
-                .toList();
+        long startNanos = System.nanoTime();
+        List<MediaResponseDTO> results =
+                mediaService.searchByNaturalQuery(query)
+                        .stream()
+                        .map(MediaMapper::toDTO)
+                        .toList();
+        double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
+        System.out.printf("[MediaController] query=\"%s\" -> %d result(s) in %.3fs%n",
+                query, results.size(), elapsedSeconds);
         return new ApiResponse<>(true, "Search completed", results);
     }
 

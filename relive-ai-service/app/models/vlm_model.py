@@ -36,6 +36,13 @@ hand-written category rules; word-quality work is focused on the one thing
 that isn't tolerable (fabricated/non-existent words), which is a
 lemmatization problem, not a prompting problem — see app/utils/lemmatizer.py.
 
+_llm_lock: this object isn't currently called concurrently with itself
+under the current architecture (the backend's single-threaded async
+executor already prevents that), but the lock is added anyway as cheap,
+defensive consistency with llm_model.py's _llm_lock, which fixes a
+confirmed real hang caused by exactly this kind of unprotected concurrent
+access to a shared llama-cpp-python model object.
+
 Loading starts at the DETECTED hardware tier and steps down only on an
 actual load failure.
 """
@@ -44,6 +51,7 @@ import base64
 import io
 import json
 import os
+import threading
 
 from PIL import Image
 from llama_cpp import Llama, LlamaGrammar
@@ -107,20 +115,10 @@ def _load_with_fallback():
 
 
 _llm = _load_with_fallback()
+_llm_lock = threading.Lock()
 
 _NUM_CATEGORIES = len(VOCABULARY_CATEGORIES)
 
-# One entry per category, in the SAME fixed order as VOCABULARY_CATEGORIES —
-# correlated by position rather than repeating category names in the schema,
-# to keep this a flat (non-recursive) schema that from_json_schema handles
-# fine (the earlier grammar bug was specific to genuinely self-referential
-# $ref trees, not fixed-length arrays like this one).
-#
-# Deliberately NO minItems on "words": a schema-level minimum can't tell the
-# difference between "the model gave up early" and "this category genuinely
-# doesn't apply to this image" — forcing a minimum would make the model
-# hallucinate filler words in the second case. Exhaustiveness is pushed for
-# through the prompt and sampling parameters instead (see below).
 _VOCAB_SCHEMA = {
     "type": "object",
     "properties": {
@@ -190,14 +188,6 @@ def _image_to_data_uri(image: Image.Image) -> str:
 
 
 def _compute_max_tokens(text_prompt: str) -> int:
-    """Dynamic output budget, mirroring the pattern in llm_model.py's
-    generate_synonyms(). We can only tokenize the TEXT portion of the prompt
-    directly (Llama.tokenize() is text-only) — the image consumes a separate,
-    variable number of vision tokens depending on resolution/tiling that we
-    can't measure this way, so VLM_IMAGE_TOKEN_RESERVE stands in as a
-    conservative reserve for that (sized for images already capped by
-    resize_image()). VLM_VOCAB_MIN_TOKENS is a floor so the budget never gets
-    suspiciously small even if these estimates are off in the wrong direction."""
     full_text_for_count = _VOCAB_SYSTEM_PROMPT + text_prompt
     text_token_count = len(_llm.tokenize(full_text_for_count.encode("utf-8")))
 
@@ -208,12 +198,6 @@ def _compute_max_tokens(text_prompt: str) -> int:
 
 
 def generate_vocabulary(image: Image.Image) -> list[str]:
-    """Takes an already-processed PIL Image (RGB, resized) — NOT a file path.
-    Single call, single image encode, all 22 categories addressed with a
-    per-category reasoning scratchpad inside the constrained JSON output.
-    Sampling is non-greedy (temperature > 0) specifically for this call —
-    exhaustive enumeration benefits from it far more than query parsing or
-    synonym generation do, which stay deterministic."""
     image_data_uri = _image_to_data_uri(image)
     text_prompt = f"Categories:\n\n{_CATEGORIES_BLOCK}"
 
@@ -230,14 +214,15 @@ def generate_vocabulary(image: Image.Image) -> list[str]:
         },
     ]
 
-    completion = _llm.create_chat_completion(
-        messages=messages,
-        grammar=_vocab_grammar,
-        max_tokens=max_tokens,
-        temperature=VLM_VOCAB_TEMPERATURE,
-        top_p=VLM_VOCAB_TOP_P,
-        repeat_penalty=VLM_VOCAB_REPEAT_PENALTY,
-    )
+    with _llm_lock:
+        completion = _llm.create_chat_completion(
+            messages=messages,
+            grammar=_vocab_grammar,
+            max_tokens=max_tokens,
+            temperature=VLM_VOCAB_TEMPERATURE,
+            top_p=VLM_VOCAB_TOP_P,
+            repeat_penalty=VLM_VOCAB_REPEAT_PENALTY,
+        )
     raw_text = completion["choices"][0]["message"]["content"]
 
     all_words: set[str] = set()

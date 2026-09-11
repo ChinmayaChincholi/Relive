@@ -17,6 +17,6 @@ public class SearchExpression {
     private List<SearchExpression> mustNot = new ArrayList<>();
 
     public boolean isLeaf() {
-        return term != null;
+        return term != null && must.isEmpty() && should.isEmpty() && mustNot.isEmpty();
     }
 }
