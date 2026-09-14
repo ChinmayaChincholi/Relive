@@ -1,33 +1,18 @@
-import { useState } from 'react';
 import AppLayout from '../components/AppLayout';
-import { searchNatural, getImageUrl } from '../services/mediaService';
+import { getImageUrl } from '../services/mediaService';
+import { useAskSearch } from '../context/AskSearchContext';
 
 export default function Ask() {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
+  const { query, setQuery, results, loading, searched, runSearch } = useAskSearch();
 
-  const handleSearch = async () => {
-    if (!query.trim()) return;
-    try {
-      setLoading(true);
-      setSearched(true);
-      const data = await searchNatural(query);
-      setResults(data);
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const handleSearch = () => runSearch(query);
 
-  const suggestions = [
-    'Photos of people eating pizza',
-    'Family photos October 2022',
-    'Night out at a restaurant',
-    'Group photos in Bangalore',
-  ];
+    const suggestions = [
+      'Photos of people eating pizza',
+      'Family photos October 2022',
+      'Night out at a restaurant',
+      'Group photos in Bangalore',
+    ];
 
   return (
     <AppLayout noTopBar>

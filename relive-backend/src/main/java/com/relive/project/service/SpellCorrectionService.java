@@ -27,15 +27,38 @@ public class SpellCorrectionService {
         lock.writeLock().lock();
         try {
             List<String> words = new ArrayList<>();
-            // media_keywords now only ever holds VOCAB rows (LOCATION moved
-            // to its own table below), so no domain filter is needed here
-            // anymore.
             words.addAll(mediaKeywordRepository.findDistinctKeywords());
-            words.addAll(locationRepository.findDistinctLocationNames());
+
+            // Location names (and person names) can be multi-word phrases
+            // ("tamil nadu", "los angeles"). correctQuery() corrects each
+            // whitespace-separated token of the user's query independently,
+            // so a multi-word phrase added to the dictionary as one whole
+            // string is invisible to a single-word query token --- "nadu"
+            // can never edit-distance-match "tamil nadu" (a 6-character
+            // length gap, far past MAX_EDIT_DISTANCE). Confirmed bug: "tamil
+            // nadu" typed correctly as two words was corrected to "tamil
+            // navy" because "nadu" alone was never in the dictionary at any
+            // granularity, while "navy" (an unrelated VOCAB color keyword)
+            // coincidentally sat exactly 2 edits away. Adding each
+            // constituent word alongside the full phrase means "nadu" is
+            // now an exact dictionary entry and short-circuits straight
+            // past the edit-distance search.
+            for (String locationName : locationRepository.findDistinctLocationNames()) {
+                words.add(locationName);
+                for (String part : locationName.split("\\s+")) {
+                    if (!part.isBlank()) words.add(part);
+                }
+            }
+
             facePersonRepository.findAll().forEach(p -> {
-                if (p.getName() != null && !p.getName().isBlank())
+                if (p.getName() != null && !p.getName().isBlank()) {
                     words.add(p.getName());
+                    for (String part : p.getName().split("\\s+")) {
+                        if (!part.isBlank()) words.add(part);
+                    }
+                }
             });
+
             symSpell.rebuild(words);
             System.out.println("Spelling dictionary rebuilt: " + words.size() + " words");
         } finally {

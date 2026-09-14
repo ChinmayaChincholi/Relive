@@ -143,7 +143,7 @@ MIN_FACE_SIZE = 30
 MAX_IMAGE_DIMENSION = 1280
 
 FACE_CLUSTER_MIN_CLUSTER_SIZE = 2
-FACE_CLUSTER_MIN_SAMPLES = 1
+FACE_CLUSTER_MIN_SAMPLES = 2
 FACE_CLUSTER_METRIC = "euclidean"
 
 # ---------------------------------------------------------------------------

@@ -106,7 +106,6 @@ export default function Sidebar() {
         {navItem('🔍', 'Search', '/ask')}
         {navItem('🖼️', 'All Photos', '/media')}
         {navItem('👥', 'Your People', '/faces')}
-        {navItem('🗺️', 'Map', '/map')}
       </div>
 
     </div>

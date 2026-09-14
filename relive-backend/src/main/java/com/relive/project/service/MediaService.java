@@ -29,7 +29,6 @@ public class MediaService {
     private final MediaRepository mediaRepository;
     private final MediaKeywordRepository mediaKeywordRepository;
     private final FaceEmbeddingRepository faceEmbeddingRepository;
-    private final FacePersonRepository facePersonRepository;
     private final LocationRepository locationRepository;
 
     public String uploadMedia(MultipartFile file) throws IOException {
@@ -73,26 +72,18 @@ public class MediaService {
                 () -> new RuntimeException("Media not found: " + id)
         );
 
-        List<FaceEmbedding> embeddings = faceEmbeddingRepository.findByMedia_Id(id);
-        Set<Long> affectedPersonIds = embeddings.stream()
-                .filter(fe -> fe.getPerson() != null)
-                .map(fe -> fe.getPerson().getId())
-                .collect(Collectors.toSet());
-
+        // Orphaned FacePerson cleanup (a person left with zero embeddings
+        // once this media's faces are removed) is handled automatically by
+        // trg_face_embedding_delete_orphan_person (see
+        // DatabaseIntegrityStartupProcessor) as part of the delete below.
+        // Doing it again here raced against that trigger's own delete and
+        // threw StaleObjectStateException, since Hibernate's persistence
+        // context had no way to know the trigger had already removed the row.
         faceEmbeddingRepository.deleteByMedia(media);
-
-        for (Long personId : affectedPersonIds) {
-            facePersonRepository.findById(personId).ifPresent(person -> {
-                if (faceEmbeddingRepository.findByPerson(person).isEmpty()) {
-                    facePersonRepository.delete(person);
-                }
-            });
-        }
-
         mediaKeywordRepository.deleteByMedia(media);
         locationRepository.deleteByMedia(media);
 
-        // No AI-service call needed anymore — there's no external vector
+        // No AI-service call needed anymore --- there's no external vector
         // store; everything searchable lives in this database and is
         // already removed above.
 

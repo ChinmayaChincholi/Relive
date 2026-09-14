@@ -17,7 +17,6 @@ public class MediaMapper {
         dto.setDateTaken(media.getDateTaken());
         dto.setLocation(media.getLocation());
         dto.setEventType(media.getEventType());
-
         return dto;
     }
 }

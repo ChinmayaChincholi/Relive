@@ -291,7 +291,7 @@ public class FaceService {
                 .orElse(embeddings.get(0).getCropPath());
     }
 
-    private static final double PERSON_MATCH_THRESHOLD = 0.5;
+    private static final double PERSON_MATCH_THRESHOLD = 0.62;
 
     private void assignOrCreatePerson(FaceEmbedding newEmbedding) {
         double[] newVec = parseEmbedding(newEmbedding.getEmbeddingCsv());

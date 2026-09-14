@@ -58,12 +58,9 @@ def _load_and_resize(image_path: str):
 
 
 def extract_faces_from_image(image_path: str) -> list[dict]:
-    """Always returns real embeddings — this is now the ONLY face extraction
-    path; the old count-only path (count_faces) has been removed since the
-    main import pipeline needs real embeddings to do anything useful with
-    faces, not just a headcount."""
     img = _load_and_resize(image_path)
     faces = _app.get(img)
+    img_h, img_w = img.shape[:2]
 
     results = []
     for i, face in enumerate(faces):
@@ -73,7 +70,17 @@ def extract_faces_from_image(image_path: str) -> list[dict]:
         if w < MIN_FACE_SIZE or h < MIN_FACE_SIZE:
             continue
 
-        crop = img[max(0, box[1]):box[3], max(0, box[0]):box[2]]
+        # Pad 50% of the box's own width/height on each side so the crop
+        # shows the whole head and a bit of context, not just the tight
+        # detector box (eyes-to-chin).
+        pad_x = int(w * 0.5)
+        pad_y = int(h * 0.5)
+        x1 = max(0, box[0] - pad_x)
+        y1 = max(0, box[1] - pad_y)
+        x2 = min(img_w, box[2] + pad_x)
+        y2 = min(img_h, box[3] + pad_y)
+
+        crop = img[y1:y2, x1:x2]
         crop_path = f"{image_path}.face{i}.jpg"
         cv2.imwrite(crop_path, crop)
 

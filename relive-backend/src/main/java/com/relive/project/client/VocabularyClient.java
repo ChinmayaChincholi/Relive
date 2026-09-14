@@ -60,4 +60,5 @@ public class VocabularyClient {
         public String locationCountry;
         public String locationDisplay;
     }
+
 }

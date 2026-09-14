@@ -145,7 +145,6 @@ _VOCAB_SCHEMA = {
     },
     "required": ["categories"],
 }
-_vocab_grammar = LlamaGrammar.from_json_schema(json.dumps(_VOCAB_SCHEMA))
 
 _VOCAB_SYSTEM_PROMPT = """You are an exhaustive visual vocabulary extractor for a personal photo search engine.
 You will be given one image and a numbered list of 21 categories. For EACH category, in order, produce:
@@ -221,10 +220,12 @@ def generate_vocabulary(image: Image.Image) -> list[str]:
         },
     ]
 
+    grammar = LlamaGrammar.from_json_schema(json.dumps(_VOCAB_SCHEMA))
     with _llm_lock:
+        _llm.reset()
         completion = _llm.create_chat_completion(
             messages=messages,
-            grammar=_vocab_grammar,
+            grammar=grammar,
             max_tokens=max_tokens,
             temperature=VLM_VOCAB_TEMPERATURE,
             top_p=VLM_VOCAB_TOP_P,

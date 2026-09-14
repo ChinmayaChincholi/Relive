@@ -55,9 +55,9 @@ def extract_exif_location(image):
     Returns a dict {city, region, country, display} or None. All three
     granularities (city/region/country) get indexed as separate LOCATION
     keywords by the backend, so "Bengaluru", "Karnataka", and "India" are
-    all independently searchable — not just the combined display string.
+    all independently searchable --- not just the combined display string.
     `country` is always a full country name (e.g. "India"), never a raw
-    ISO code — see _country_name_from_code.
+    ISO code --- see _country_name_from_code.
     """
     try:
         exif_data = image._getexif()
@@ -93,7 +93,7 @@ def extract_exif_location(image):
             parts = [p for p in [city, region, country] if p]
             display = ", ".join(parts) if parts else f"{round(lat, 6)},{round(lon, 6)}"
             return {"city": city, "region": region, "country": country, "display": display}
-        # Reverse geocoding found no match for these coordinates — nothing
+        # Reverse geocoding found no match for these coordinates --- nothing
         # queryable to index, but still worth a display string for the UI.
         return {"city": None, "region": None, "country": None,
                 "display": f"{round(lat, 6)},{round(lon, 6)}"}

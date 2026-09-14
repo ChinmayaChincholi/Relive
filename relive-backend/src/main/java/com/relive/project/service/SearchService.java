@@ -20,6 +20,7 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 @RequiredArgsConstructor
@@ -30,15 +31,25 @@ public class SearchService {
     private final FaceService faceService;
     private final QueryParserClient queryParserClient;
     private final SpellCorrectionService spellCorrectionService;
+    private final AtomicLong searchGeneration = new AtomicLong(0);
 
     private static final double FUZZY_THRESHOLD = JaroWinklerUtil.DEFAULT_THRESHOLD;
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("dd-MM-yyyy");
     private static final DateTimeFormatter MONTH_YEAR_FORMAT = DateTimeFormatter.ofPattern("MM-yyyy");
 
     public List<Media> searchByNaturalQuery(String rawQuery) {
+        long myGeneration = searchGeneration.incrementAndGet();
+
         String corrected = spellCorrectionService.correctQuery(rawQuery);
         List<String> knownNames = faceService.getAllPersonNames();
         List<String> knownLocations = locationRepository.findDistinctLocationNames();
+
+        // Change 4 — a newer query has already started; abandon this one
+        // before even paying for the AI-service round trip.
+        if (myGeneration != searchGeneration.get()) {
+            System.out.println("[SearchService] query=\"" + rawQuery + "\" superseded before parsing — skipping");
+            return Collections.emptyList();
+        }
 
         SearchExpression tree;
         try {
@@ -48,6 +59,15 @@ public class SearchService {
             return Collections.emptyList();
         }
         if (tree == null) return Collections.emptyList();
+
+        // Change 4 — a newer query started while this one was blocked on
+        // the AI service. The parse result is now stale; don't spend the
+        // rest of this method evaluating a query the user already moved on
+        // from, and don't let it clobber the newer search's result.
+        if (myGeneration != searchGeneration.get()) {
+            System.out.println("[SearchService] query=\"" + rawQuery + "\" superseded after parsing — discarding result");
+            return Collections.emptyList();
+        }
 
         try {
             System.out.println("[SearchService] tree before repair: "
@@ -76,21 +96,6 @@ public class SearchService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Change 4 — merges what used to be two separate tree walks
-     * (resolveDomains(), which fuzzy-matched a term just to relabel its
-     * domain, then evaluate()->lookup(), which fuzzy-matched the SAME value
-     * again to actually fetch results) into one. For PERSON/LOCATION/VOCAB
-     * terms, a single fuzzy match against face_persons/locations now serves
-     * as both the corrected domain label AND the result set, instead of
-     * being computed twice. DATE/TIME are trusted completely and go
-     * straight to their own deterministic parsers, exactly as before — this
-     * priority-lookup logic never touches them.
-     *
-     * A node's own "term" is ANDed into the result alongside
-     * must/should/must_not, instead of a term-bearing node short-circuiting
-     * straight to a lookup and silently discarding any children.
-     */
     private Set<Long> classifyAndEvaluate(SearchExpression node, List<String> knownNames,
                                           List<String> knownLocations, Set<Long> universe) {
         Set<Long> result = null;

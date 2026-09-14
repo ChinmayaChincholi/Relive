@@ -14,8 +14,8 @@ export const getMyMedia = async () => {
   return res.data.data;
 };
 
-export const searchNatural = async (query) => {
-  const res = await api.get("/media/search-natural", { params: { query } });
+export const searchNatural = async (query, signal) => {
+  const res = await api.get("/media/search-natural", { params: { query }, signal });
   if (!res.data.success) throw new Error(res.data.message);
   return res.data.data;
 };

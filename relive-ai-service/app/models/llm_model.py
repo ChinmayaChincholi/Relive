@@ -20,6 +20,7 @@ instead of racing.
 import json
 import os
 import threading
+import time
 
 from llama_cpp import Llama, LlamaGrammar
 
@@ -46,7 +47,7 @@ def _try_load(model_name: str):
         filename=gguf_file,
         n_ctx=LLM_CONTEXT_WINDOW,
         n_threads=os.cpu_count(),
-        verbose=False,
+        verbose=True,
     )
     print(f"[llm_model] Loaded {model_name}.")
     return llm
@@ -110,7 +111,6 @@ _SYNONYM_SCHEMA = {
     },
     "required": ["expansions"],
 }
-_synonym_grammar = LlamaGrammar.from_json_schema(json.dumps(_SYNONYM_SCHEMA))
 
 # ---------------------------------------------------------------------------
 # Query expression tree grammar — JSON Schema, fully inlined (no $ref), 3
@@ -171,7 +171,6 @@ _EXPRESSION_SCHEMA = _expression_level_schema(
         )
     )
 )
-_expression_grammar = LlamaGrammar.from_json_schema(json.dumps(_EXPRESSION_SCHEMA))
 
 # ---------------------------------------------------------------------------
 # Job 2 — synonym / related-word expansion (import time, text-only, batched)
@@ -204,31 +203,24 @@ def _generate_synonyms_batch(words: list[str]) -> dict[str, list[str]]:
     prompt = f"Words:\n{numbered}"
     full_prompt_text = _SYNONYM_SYSTEM_PROMPT + prompt
     prompt_token_count = len(_llm.tokenize(full_prompt_text.encode("utf-8")))
-    # Capped, same reasoning as parse_query(): a batch of N words needs at
-    # most a few dozen tokens of JSON per word. Uncapped, this formula could
-    # allow 6000+ tokens of headroom for a small batch, and a model stuck in
-    # a repetition loop will happily use all of it before being cut off —
-    # confirmed in testing: an 18-word batch produced a 20,000+ character
-    # truncated, unparseable response before this cap was added. Kept as a
-    # defense-in-depth backstop alongside the maxItems schema bound above
-    # and repeat_penalty below, which target the actual looping tendency
-    # more directly.
     max_tokens = min(150 * len(words), max(500, LLM_CONTEXT_WINDOW - prompt_token_count - LLM_SYNONYM_SAFETY_MARGIN))
     try:
+        grammar = LlamaGrammar.from_json_schema(json.dumps(_SYNONYM_SCHEMA))
         with _llm_lock:
+            _llm.reset()
             completion = _llm.create_chat_completion(
                 messages=[
                     {"role": "system", "content": _SYNONYM_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                grammar=_synonym_grammar,
+                grammar=grammar,
                 max_tokens=max_tokens,
                 temperature=0.0,
             )
         raw_text = completion["choices"][0]["message"]["content"]
     except Exception as e:
         print(f"[llm_model] Synonym generation call failed for a batch of "
-              f"{len(words)} word(s): {e} — retrying with smaller batch(es).")
+              f"{len(words)} word(s): {e} --- retrying with smaller batch(es).")
         return _retry_split(words)
     try:
         parsed = json.loads(raw_text)
@@ -579,39 +571,44 @@ def _fallback_expression(query: str) -> dict:
 
 
 def parse_query(query: str) -> dict:
-    # Reverted: this used to also accept a known_names list and prepend it to
-    # the prompt, in an attempt to get Qwen to self-correct PERSON
-    # classification. Even given the exact registered name list including
-    # "Amma", it still classified "amma" as VOCAB. Prompt-based grounding
-    # wasn't reliable even in the best case. Domain correctness now lives
-    # entirely in SearchService.classifyAndEvaluate() on the Java side,
-    # deterministically re-checked against real registered data.
     full_prompt_text = _QUERY_SYSTEM_PROMPT + query
     prompt_token_count = len(_llm.tokenize(full_prompt_text.encode("utf-8")))
-    # Capped at 1000 regardless of context-window headroom — a query
-    # expression tree needs a few hundred tokens at most. Confirmed real
-    # exposure without this cap: a ~7000-token ceiling here let one confused
-    # generation hang for 15+ minutes on CPU-bound hardware before this fix.
-    # The prompt above is considerably longer than before (the worked
-    # examples add real token count), but LLM_CONTEXT_WINDOW (8192) has
-    # comfortable headroom for that — this cap is about bounding worst-case
-    # generation length, not prompt length, and doesn't need to change.
     max_tokens = min(1000, max(500, LLM_CONTEXT_WINDOW - prompt_token_count - LLM_SYNONYM_SAFETY_MARGIN))
+
+    grammar_start = time.perf_counter()
+    grammar = LlamaGrammar.from_json_schema(json.dumps(_EXPRESSION_SCHEMA))
+    grammar_elapsed = time.perf_counter() - grammar_start
+    print(f"[llm_model] parse_query query={query!r} step=grammar_build took={grammar_elapsed:.3f}s")
+
+    lock_wait_start = time.perf_counter()
     with _llm_lock:
+        lock_wait_elapsed = time.perf_counter() - lock_wait_start
+        print(f"[llm_model] parse_query query={query!r} step=lock_wait took={lock_wait_elapsed:.3f}s")
+
+        generation_start = time.perf_counter()
+        _llm.reset()
         completion = _llm.create_chat_completion(
             messages=[
                 {"role": "system", "content": _QUERY_SYSTEM_PROMPT},
                 {"role": "user", "content": query},
             ],
-            grammar=_expression_grammar,
+            grammar=grammar,
             max_tokens=max_tokens,
             temperature=0.0,
         )
+
+        generation_elapsed = time.perf_counter() - generation_start
+        usage = completion.get("usage", {})
+        print(f"[llm_model] parse_query query={query!r} step=generation "
+              f"prompt_tokens={usage.get('prompt_tokens')} "
+              f"completion_tokens={usage.get('completion_tokens')} "
+              f"took={generation_elapsed:.3f}s")
+
     raw_text = completion["choices"][0]["message"]["content"]
     try:
         parsed = json.loads(raw_text)
         print(f"[llm_model] Parsed query {query!r} -> {json.dumps(parsed)}")
         return parsed
     except Exception as e:
-        print(f"[llm_model] Query parse failed: {e} — falling back to a per-word OR match.")
+        print(f"[llm_model] Query parse failed: {e} --- falling back to a per-word OR match.")
         return _fallback_expression(query)
