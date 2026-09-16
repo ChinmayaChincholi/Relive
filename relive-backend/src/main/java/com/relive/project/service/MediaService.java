@@ -44,19 +44,27 @@ public class MediaService {
     }
 
     public Map<String, Long> getProgress() {
-        long total      = mediaRepository.count();
+        long total = mediaRepository.count();
         long processing = mediaRepository.countByStatus("PROCESSING");
-        long completed  = mediaRepository.countByStatus("COMPLETED");
-        long failed     = mediaRepository.countByStatus("FAILED");
+        long completed = mediaRepository.countByStatus("COMPLETED");
+        long failed = mediaRepository.countByStatus("FAILED");
         return Map.of(
-                "total",      total,
+                "total", total,
                 "processing", processing,
-                "completed",  completed,
-                "failed",     failed
+                "completed", completed,
+                "failed", failed
         );
     }
 
-    public List<Media> searchByNaturalQuery(String query) {
+    /**
+     * mode: "instant" routes to the deterministic, no-LLM pipeline;
+     * anything else (including null/blank) keeps today's Advanced Search
+     * behavior, so existing callers that don't pass a mode are unaffected.
+     */
+    public List<Media> searchByNaturalQuery(String query, String mode) {
+        if ("instant".equalsIgnoreCase(mode)) {
+            return searchService.searchInstant(query);
+        }
         return searchService.searchByNaturalQuery(query);
     }
 

@@ -14,8 +14,12 @@ export const getMyMedia = async () => {
   return res.data.data;
 };
 
-export const searchNatural = async (query, signal) => {
-  const res = await api.get("/media/search-natural", { params: { query }, signal });
+// mode: "advanced" (default, LLM-parsed) or "instant" (deterministic, no LLM).
+export const searchNatural = async (query, mode, signal) => {
+  const res = await api.get("/media/search-natural", {
+    params: { query, mode },
+    signal,
+  });
   if (!res.data.success) throw new Error(res.data.message);
   return res.data.data;
 };
@@ -33,7 +37,7 @@ export const deleteMedia = async (mediaId) => {
 };
 
 // Returns a URL the browser can use directly in an <img> src.
-// No token needed — the backend is local and unauthenticated.
+// No token needed --- the backend is local and unauthenticated.
 export const getImageUrl = (mediaId) =>
   `http://localhost:8080/media/image/${mediaId}`;
 

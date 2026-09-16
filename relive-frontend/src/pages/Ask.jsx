@@ -3,16 +3,21 @@ import { getImageUrl } from '../services/mediaService';
 import { useAskSearch } from '../context/AskSearchContext';
 
 export default function Ask() {
-  const { query, setQuery, results, loading, searched, runSearch } = useAskSearch();
+  const { query, setQuery, mode, setMode, results, loading, searched, runSearch } = useAskSearch();
 
-    const handleSearch = () => runSearch(query);
+  const handleSearch = () => runSearch(query, mode);
 
-    const suggestions = [
-      'Photos of people eating pizza',
-      'Family photos October 2022',
-      'Night out at a restaurant',
-      'Group photos in Bangalore',
-    ];
+  const suggestions = [
+    'Photos of people eating pizza',
+    'Family photos October 2022',
+    'Night out at a restaurant',
+    'Group photos in Bangalore',
+  ];
+
+  const modeOptions = [
+    { key: 'advanced', label: 'Advanced', hint: 'Understands complex phrasing, slower' },
+    { key: 'instant', label: 'Instant', hint: 'Rule-based, near-instant' },
+  ];
 
   return (
     <AppLayout noTopBar>
@@ -22,6 +27,33 @@ export default function Ask() {
         </div>
         <div style={{ fontSize: '13px', color: 'var(--text3)', marginBottom: '20px', fontWeight: '300' }}>
           Describe any memory in plain words
+        </div>
+
+        {/* Mode toggle */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          {modeOptions.map(opt => (
+            <div
+              key={opt.key}
+              onClick={() => setMode(opt.key)}
+              title={opt.hint}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: '700',
+                fontFamily: 'Syne, sans-serif',
+                cursor: 'pointer',
+                border: mode === opt.key ? '1px solid rgba(245,158,11,0.5)' : '1px solid var(--border)',
+                background: mode === opt.key
+                  ? 'linear-gradient(135deg, rgba(245,158,11,0.22), rgba(217,119,6,0.14))'
+                  : 'var(--surface)',
+                color: mode === opt.key ? '#f59e0b' : 'var(--text3)',
+                transition: 'all 0.15s',
+              }}
+            >
+              {opt.label}
+            </div>
+          ))}
         </div>
 
         {/* Search input */}

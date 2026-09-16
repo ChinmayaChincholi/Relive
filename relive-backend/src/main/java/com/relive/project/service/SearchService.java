@@ -8,6 +8,7 @@ import com.relive.project.entity.MediaKeyword;
 import com.relive.project.repository.LocationRepository;
 import com.relive.project.repository.MediaKeywordRepository;
 import com.relive.project.repository.MediaRepository;
+import com.relive.project.util.DeterministicQueryParser;
 import com.relive.project.util.JaroWinklerUtil;
 import com.relive.project.util.LemmatizerUtil;
 import com.relive.project.util.QueryTreeRepair;
@@ -44,10 +45,10 @@ public class SearchService {
         List<String> knownNames = faceService.getAllPersonNames();
         List<String> knownLocations = locationRepository.findDistinctLocationNames();
 
-        // Change 4 — a newer query has already started; abandon this one
+        // Change 4 --- a newer query has already started; abandon this one
         // before even paying for the AI-service round trip.
         if (myGeneration != searchGeneration.get()) {
-            System.out.println("[SearchService] query=\"" + rawQuery + "\" superseded before parsing — skipping");
+            System.out.println("[SearchService] query=\"" + rawQuery + "\" superseded before parsing --- skipping");
             return Collections.emptyList();
         }
 
@@ -60,40 +61,71 @@ public class SearchService {
         }
         if (tree == null) return Collections.emptyList();
 
-        // Change 4 — a newer query started while this one was blocked on
+        // Change 4 --- a newer query started while this one was blocked on
         // the AI service. The parse result is now stale; don't spend the
         // rest of this method evaluating a query the user already moved on
         // from, and don't let it clobber the newer search's result.
         if (myGeneration != searchGeneration.get()) {
-            System.out.println("[SearchService] query=\"" + rawQuery + "\" superseded after parsing — discarding result");
+            System.out.println("[SearchService] query=\"" + rawQuery + "\" superseded after parsing --- discarding result");
             return Collections.emptyList();
         }
 
-        try {
-            System.out.println("[SearchService] tree before repair: "
-                    + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(tree));
-        } catch (Exception e) {
-            System.out.println("[SearchService] tree before repair: <failed to serialize> " + e.getMessage());
-        }
+        logTree("before repair", tree);
         QueryTreeRepair.repair(tree, corrected);
-        try {
-            System.out.println("[SearchService] tree after repair: "
-                    + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(tree));
-        } catch (Exception e) {
-            System.out.println("[SearchService] tree after repair: <failed to serialize> " + e.getMessage());
+        logTree("after repair", tree);
+
+        return evaluate(tree, knownNames, knownLocations, rawQuery);
+    }
+
+    /**
+     * Instant Search --- same spell-corrected text, same known-entity
+     * lists, same evaluator (evaluate() / classifyAndEvaluate() /
+     * resolveAndLookupLeaf()) as Advanced Search. The only difference is
+     * how the SearchExpression tree gets built: DeterministicQueryParser
+     * runs entirely in this JVM, with no AI-service call and no LLM
+     * involved at all, so this method never blocks on anything but the
+     * database.
+     */
+    public List<Media> searchInstant(String rawQuery) {
+        long myGeneration = searchGeneration.incrementAndGet();
+
+        String corrected = spellCorrectionService.correctQuery(rawQuery);
+        List<String> knownNames = faceService.getAllPersonNames();
+        List<String> knownLocations = locationRepository.findDistinctLocationNames();
+
+        if (myGeneration != searchGeneration.get()) {
+            System.out.println("[SearchService][instant] query=\"" + rawQuery + "\" superseded --- skipping");
+            return Collections.emptyList();
         }
 
+        SearchExpression tree = DeterministicQueryParser.parse(corrected, knownNames, knownLocations);
+        logTree("instant tree", tree);
+
+        return evaluate(tree, knownNames, knownLocations, rawQuery);
+    }
+
+    private List<Media> evaluate(SearchExpression tree, List<String> knownNames, List<String> knownLocations,
+                                 String rawQuery) {
         Set<Long> universe = mediaRepository.findAll().stream()
                 .filter(m -> "COMPLETED".equals(m.getStatus()))
                 .map(Media::getId)
                 .collect(Collectors.toSet());
 
         Set<Long> resultIds = classifyAndEvaluate(tree, knownNames, knownLocations, universe);
-        System.out.println("[SearchService] final result media ids: " + resultIds);
+        System.out.println("[SearchService] query=\"" + rawQuery + "\" final result media ids: " + resultIds);
         if (resultIds.isEmpty()) return Collections.emptyList();
         return mediaRepository.findAllById(resultIds).stream()
                 .filter(m -> "COMPLETED".equals(m.getStatus()))
                 .collect(Collectors.toList());
+    }
+
+    private void logTree(String label, SearchExpression tree) {
+        try {
+            System.out.println("[SearchService] tree " + label + ": "
+                    + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(tree));
+        } catch (Exception e) {
+            System.out.println("[SearchService] tree " + label + ": <failed to serialize> " + e.getMessage());
+        }
     }
 
     private Set<Long> classifyAndEvaluate(SearchExpression node, List<String> knownNames,
@@ -130,7 +162,7 @@ public class SearchService {
 
         if (!node.getMustNot().isEmpty()) {
             if (!hasPositive) {
-                // Pure negation — nothing else in "must"/"should" to anchor
+                // Pure negation --- nothing else in "must"/"should" to anchor
                 // the search to. Without this, an empty base set minus
                 // anything would still be empty, so a bare "without X"
                 // query would always incorrectly return zero results
@@ -236,7 +268,7 @@ public class SearchService {
                     .map(Media::getId)
                     .collect(Collectors.toSet());
         } catch (Exception e) {
-            System.out.println("Invalid date term: " + value + " / " + rangeEnd + " — " + e.getMessage());
+            System.out.println("Invalid date term: " + value + " / " + rangeEnd + " --- " + e.getMessage());
             return Collections.emptySet();
         }
     }

@@ -584,9 +584,8 @@ def parse_query(query: str) -> dict:
     with _llm_lock:
         lock_wait_elapsed = time.perf_counter() - lock_wait_start
         print(f"[llm_model] parse_query query={query!r} step=lock_wait took={lock_wait_elapsed:.3f}s")
-
-        generation_start = time.perf_counter()
         _llm.reset()
+        generation_start = time.perf_counter()
         completion = _llm.create_chat_completion(
             messages=[
                 {"role": "system", "content": _QUERY_SYSTEM_PROMPT},
