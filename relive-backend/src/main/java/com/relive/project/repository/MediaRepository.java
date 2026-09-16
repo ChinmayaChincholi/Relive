@@ -11,8 +11,6 @@ import java.util.Optional;
 
 public interface MediaRepository extends JpaRepository<Media, Long> {
 
-    List<Media> findByStatus(String status);
-
     List<Media> findByStatusIn(List<String> statuses);
 
     long countByStatus(String status);

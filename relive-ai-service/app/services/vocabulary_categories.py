@@ -1,7 +1,7 @@
 """
 The 21-category vocabulary ontology used to prompt Qwen at image-import time.
-Each category becomes one separate prompt (see app/models/vlm_model.py ->
-generate_vocabulary). Category text is taken directly from the locked design
+All categories are sent together in ONE prompt/call (see app/models/vlm_model.py ->
+generate_vocabulary), not one prompt per category. Category text is taken directly from the locked design
 spec — scope/includes/examples are reproduced deliberately so the prompts
 match what was agreed, not a paraphrase that could drift over time.
 

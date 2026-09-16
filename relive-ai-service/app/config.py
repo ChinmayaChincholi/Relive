@@ -1,7 +1,7 @@
 from app.hardware import Tier, describe as describe_hardware
 
 # ---------------------------------------------------------------------------
-# VISION model — image processing step 9 (22-category vocabulary generation).
+# VISION model — image processing step 9 (21-category vocabulary generation).
 # Qwen2.5-VL specifically, because it's the newest Qwen-VL family with
 # OFFICIAL support in llama-cpp-python 0.3.35 (Qwen25VLChatHandler, added
 # upstream). Qwen3.5/3.6-VL vision support only exists in a third-party fork
@@ -31,7 +31,7 @@ VLM_MMPROJ_FILE_BY_MODEL = {
     "Qwen2.5-VL-72B": "mmproj-F16.gguf",
 }
 # Raised from 8192 -> 16384: the old value left very little headroom for an
-# exhaustive 22-category word list once the system prompt + category block +
+# exhaustive 21-category word list once the system prompt + category block +
 # image tokens were subtracted out. Extensiveness is the stated priority over
 # speed, so this trades some load-time memory for a much bigger output budget.
 VLM_CONTEXT_WINDOW = 16384
@@ -86,15 +86,17 @@ LLM_REPO_BY_MODEL = {
     "Qwen3.5-9B":  "unsloth/Qwen3.5-9B-GGUF",
     "Qwen3.6-27B": "unsloth/Qwen3.6-27B-GGUF",
 }
-# NOTE: these are still wildcards and may hit the exact same "multiple files
-# matched" crash the VLM glob just hit — waiting on your file listing for
-# these three repos (see previous message) to pin them to exact filenames
-# the same way. Try running it; if it crashes, paste the "Available Files"
-# list here the same way you did for the VLM repos and I'll pin these too.
+# Pinned to exact filenames, matching VLM_GGUF_FILE_BY_MODEL above. Checked
+# against each repo's live file listing: as of this check, "*Q4_K_M.gguf"
+# resolves unambiguously in all three repos (each has exactly one file
+# ending that way --- unlike the VLM mmproj repos, which shipped three
+# BF16/F16/F32 mmproj files under the same wildcard and crashed loading).
+# Pinned anyway as a precaution, since a repo could add another matching
+# file later and silently reintroduce that failure mode.
 LLM_GGUF_FILE_BY_MODEL = {
-    "Qwen3.5-4B":  "*Q4_K_M.gguf",
-    "Qwen3.5-9B":  "*Q4_K_M.gguf",
-    "Qwen3.6-27B": "*Q4_K_M.gguf",
+    "Qwen3.5-4B":  "Qwen3.5-4B-Q4_K_M.gguf",
+    "Qwen3.5-9B":  "Qwen3.5-9B-Q4_K_M.gguf",
+    "Qwen3.6-27B": "Qwen3.6-27B-Q4_K_M.gguf",
 }
 LLM_CONTEXT_WINDOW = 8192
 LLM_MAX_NEW_TOKENS_SYNONYMS = 400

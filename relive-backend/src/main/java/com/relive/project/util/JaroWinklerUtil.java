@@ -72,16 +72,6 @@ public final class JaroWinklerUtil {
                 + (matches - transpositions) / matches) / 3.0;
     }
 
-    public static boolean containsFuzzyToken(String haystack, String needle, double threshold) {
-        if (haystack == null || needle == null) return false;
-        String[] tokens = haystack.split("[,\\s()]+");
-        for (String token : tokens) {
-            if (token.isBlank()) continue;
-            if (similarity(token, needle) >= threshold) return true;
-        }
-        return false;
-    }
-
     public static String bestMatch(String query, Iterable<String> candidates, double threshold) {
         String best = null;
         double bestScore = threshold;

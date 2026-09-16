@@ -10,13 +10,7 @@ import java.util.List;
 
 public interface FaceEmbeddingRepository extends JpaRepository<FaceEmbedding, Long> {
 
-    List<FaceEmbedding> findByMedia_Id(Long mediaId);
-
-    List<FaceEmbedding> findAll();
-
     List<FaceEmbedding> findByPerson(FacePerson person);
-
-    List<FaceEmbedding> findByPersonIsNull();
 
     @Modifying
     void deleteByMedia(Media media);

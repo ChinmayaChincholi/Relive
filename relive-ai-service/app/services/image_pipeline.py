@@ -4,7 +4,6 @@ from PIL import Image
 from app.models.vlm_model import generate_vocabulary
 from app.models.llm_model import generate_synonyms
 from app.models.object_detection_model import detect_objects
-from app.models.face_model import extract_faces_from_image
 from app.utils.image_utils import (
     resize_image,
     extract_exif_date,

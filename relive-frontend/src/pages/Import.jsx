@@ -2,7 +2,8 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import { uploadFolder, getMyMedia } from '../services/mediaService';
 import AppLayout from '../components/AppLayout';
 
-// Realistic per-image processing time estimate in seconds (BLIP + CLIP + YOLO + face extraction)
+// Realistic per-image processing time estimate in seconds (Qwen2.5-VL vocabulary
+// generation + RF-DETR/D-FINE object detection + InsightFace face extraction)
 const SECONDS_PER_IMAGE = 25;
 
 function formatTime(seconds) {

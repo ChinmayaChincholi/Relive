@@ -41,6 +41,12 @@ _TIER_ORDER = [Tier.HIGH, Tier.MID, Tier.LOW]
 def _try_load(model_name: str):
     repo_id = LLM_REPO_BY_MODEL[model_name]
     gguf_file = LLM_GGUF_FILE_BY_MODEL[model_name]
+    if any(ch in gguf_file for ch in "*?["):
+        raise ValueError(
+            f"{model_name}: LLM_GGUF_FILE_BY_MODEL entry \"{gguf_file}\" is a "
+            f"wildcard, not a pinned filename --- check {repo_id}'s file "
+            f"listing and replace it with the exact filename before loading."
+        )
     print(f"[llm_model] Attempting to load {model_name} ({repo_id})...")
     llm = Llama.from_pretrained(
         repo_id=repo_id,

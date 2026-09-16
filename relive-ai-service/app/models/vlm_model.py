@@ -1,13 +1,13 @@
 """
-Vision model — Qwen2.5-VL, used only for image processing step 9 (22-category
+Vision model — Qwen2.5-VL, used only for image processing step 9 (21-category
 vocabulary generation). See app/models/llm_model.py for the separate
 text-only model (query parsing, synonym generation).
 
-All 22 categories are sent in ONE call (one image encoding) rather than
-22 separate calls — confirmed via logs that llama-cpp-python's
+All 21 categories are sent in ONE call (one image encoding) rather than
+21 separate calls — confirmed via logs that llama-cpp-python's
 create_chat_completion fully re-encodes the image on every separate call
 regardless of shared conversation history, so splitting into multiple calls
-bought us nothing but 22x the encoding cost. Each category gets a required
+bought us nothing but 21x the encoding cost. Each category gets a required
 "scratchpad" reasoning field before its word list, inside the same JSON
 grammar, to push the model past just restating the example words given for
 each category.
@@ -24,17 +24,6 @@ produced something plausible. max_tokens is also computed dynamically per
 call (mirroring the pattern in llm_model.py's generate_synonyms) instead of
 a single flat constant, so the output budget scales with how much room is
 actually left in the context window.
-
-NOTE: an earlier revision added 3 category-specific content rules here
-(banning relationship-guessing in People, capping Colors/Materials to
-common names, dropping generic words from Image Style). Those have been
-rolled back on purpose — they were reactive patches derived from one image
-and risked being wrong or irrelevant for the millions of other images this
-will process. Redundant/non-discriminative/occasionally-hallucinated words
-are treated as tolerable noise for now, not something to chase with more
-hand-written category rules; word-quality work is focused on the one thing
-that isn't tolerable (fabricated/non-existent words), which is a
-lemmatization problem, not a prompting problem — see app/utils/lemmatizer.py.
 
 _llm_lock: this object isn't currently called concurrently with itself
 under the current architecture (the backend's single-threaded async

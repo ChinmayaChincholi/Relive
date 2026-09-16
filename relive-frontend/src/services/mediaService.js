@@ -24,12 +24,6 @@ export const searchNatural = async (query, mode, signal) => {
   return res.data.data;
 };
 
-export const getProgress = async () => {
-  const res = await api.get("/media/progress");
-  if (!res.data.success) throw new Error(res.data.message);
-  return res.data.data;
-};
-
 export const deleteMedia = async (mediaId) => {
   const res = await api.delete(`/media/${mediaId}`);
   if (!res.data.success) throw new Error(res.data.message);

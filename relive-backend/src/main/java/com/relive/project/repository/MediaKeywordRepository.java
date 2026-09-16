@@ -10,8 +10,6 @@ import java.util.List;
 public interface MediaKeywordRepository extends JpaRepository<MediaKeyword, Long> {
     List<MediaKeyword> findByKeyword(String keyword);
 
-    List<MediaKeyword> findByKeywordContainingIgnoreCase(String keyword);
-
     @Query("SELECT DISTINCT k.keyword FROM MediaKeyword k")
     List<String> findDistinctKeywords();
 
