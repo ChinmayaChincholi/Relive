@@ -19,8 +19,10 @@ public interface MediaRepository extends JpaRepository<Media, Long> {
 
     List<Media> findByDateTakenBetween(LocalDateTime start, LocalDateTime end);
 
-    @Query(value = "SELECT id FROM media WHERE date_taken IS NOT NULL " +
-            "AND strftime('%H:%M', date_taken / 1000, 'unixepoch', 'localtime') BETWEEN :start AND :end",
+    @Query(value = "SELECT id FROM media WHERE date_taken IS NOT NULL AND (" +
+            "(:start <= :end AND strftime('%H:%M', date_taken/1000,'unixepoch','localtime') BETWEEN :start AND :end) " +
+            "OR (:start > :end AND (strftime('%H:%M', date_taken/1000,'unixepoch','localtime') >= :start " +
+            "OR strftime('%H:%M', date_taken/1000,'unixepoch','localtime') <= :end)))",
             nativeQuery = true)
     List<Long> findIdsByTimeOfDayBetween(@Param("start") String start, @Param("end") String end);
 }

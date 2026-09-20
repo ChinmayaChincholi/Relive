@@ -9,6 +9,8 @@ from app.config import (
     FACE_CLUSTER_MIN_CLUSTER_SIZE,
     FACE_CLUSTER_MIN_SAMPLES,
     FACE_CLUSTER_METRIC,
+    FACE_CLUSTER_SELECTION_METHOD,
+    FACE_CLUSTER_SELECTION_EPSILON,
 )
 
 from app.models.face_model import extract_faces_from_image
@@ -70,6 +72,8 @@ def cluster_faces(request: ClusterRequest):
         min_cluster_size=FACE_CLUSTER_MIN_CLUSTER_SIZE,
         min_samples=FACE_CLUSTER_MIN_SAMPLES,
         metric=FACE_CLUSTER_METRIC,
+        cluster_selection_method=FACE_CLUSTER_SELECTION_METHOD,
+        cluster_selection_epsilon=FACE_CLUSTER_SELECTION_EPSILON,
     )
     labels = clusterer.fit_predict(embeddings)
 

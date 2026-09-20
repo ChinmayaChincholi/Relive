@@ -234,4 +234,55 @@ public final class QueryTreeRepair {
         wrongList.removeAll(toMove);
         correctList.addAll(toMove);
     }
+
+    public static void mergeAdjacentVocab(SearchExpression root, String queryText, Set<String> knownKeywords) {
+        if (root == null || queryText == null || queryText.isBlank() || knownKeywords.isEmpty()) return;
+        List<String> tokens = tokenize(queryText); // reuses the existing private tokenizer
+        mergeInNode(root, tokens, knownKeywords);
+    }
+
+    private static void mergeInNode(SearchExpression node, List<String> tokens, Set<String> knownKeywords) {
+        mergeInList(node.getMust(), tokens, knownKeywords);
+        mergeInList(node.getShould(), tokens, knownKeywords);
+        mergeInList(node.getMustNot(), tokens, knownKeywords);
+        for (SearchExpression c : node.getMust()) mergeInNode(c, tokens, knownKeywords);
+        for (SearchExpression c : node.getShould()) mergeInNode(c, tokens, knownKeywords);
+        for (SearchExpression c : node.getMustNot()) mergeInNode(c, tokens, knownKeywords);
+    }
+
+    private static void mergeInList(List<SearchExpression> siblings, List<String> tokens, Set<String> knownKeywords) {
+        boolean mergedAny = true;
+        while (mergedAny) {
+            mergedAny = false;
+            outer:
+            for (SearchExpression a : siblings) {
+                if (!isPlainVocabLeaf(a)) continue;
+                int[] spanA = uniqueSpan(a.getTerm(), tokens); // existing helper
+                if (spanA == null) continue;
+                for (SearchExpression b : siblings) {
+                    if (a == b || !isPlainVocabLeaf(b)) continue;
+                    int[] spanB = uniqueSpan(b.getTerm(), tokens);
+                    if (spanB == null || spanB[0] != spanA[1] + 1) continue; // must be text-adjacent
+                    String concat = a.getTerm().getValue().replace(" ", "") + b.getTerm().getValue().replace(" ", "");
+                    String resolved = resolveKnownKeyword(concat, knownKeywords);
+                    if (resolved == null) continue;
+                    a.getTerm().setValue(resolved);
+                    siblings.remove(b);
+                    mergedAny = true;
+                    break outer;
+                }
+            }
+        }
+    }
+
+    private static boolean isPlainVocabLeaf(SearchExpression n) {
+        return n.isLeaf() && "VOCAB".equals(n.getTerm().getDomain());
+    }
+
+    private static String resolveKnownKeyword(String rawConcat, Set<String> knownKeywords) {
+        for (String candidate : LemmatizerUtil.candidateForms(rawConcat)) {
+            if (knownKeywords.contains(candidate)) return candidate;
+        }
+        return null;
+    }
 }

@@ -72,6 +72,8 @@ public class SearchService {
 
         logTree("before repair", tree);
         QueryTreeRepair.repair(tree, corrected);
+        Set<String> knownKeywords = new HashSet<>(mediaKeywordRepository.findDistinctKeywords());
+        QueryTreeRepair.mergeAdjacentVocab(tree, corrected, knownKeywords);
         logTree("after repair", tree);
 
         return evaluate(tree, knownNames, knownLocations, rawQuery);
@@ -99,6 +101,8 @@ public class SearchService {
         }
 
         SearchExpression tree = DeterministicQueryParser.parse(corrected, knownNames, knownLocations);
+        Set<String> knownKeywords = new HashSet<>(mediaKeywordRepository.findDistinctKeywords());
+        QueryTreeRepair.mergeAdjacentVocab(tree, corrected, knownKeywords);
         logTree("instant tree", tree);
 
         return evaluate(tree, knownNames, knownLocations, rawQuery);
@@ -131,19 +135,67 @@ public class SearchService {
     private Set<Long> classifyAndEvaluate(SearchExpression node, List<String> knownNames,
                                           List<String> knownLocations, Set<Long> universe) {
         Set<Long> result = null;
+
         if (node.getTerm() != null) {
             result = new HashSet<>(resolveAndLookupLeaf(node.getTerm(), knownNames, knownLocations));
         }
 
         boolean hasMust = !node.getMust().isEmpty();
-        for (SearchExpression child : node.getMust()) {
-            Set<Long> childResult = classifyAndEvaluate(child, knownNames, knownLocations, universe);
-            if (result == null) {
-                result = new HashSet<>(childResult);
+        if (hasMust) {
+            // Evaluate every direct child first, remembering which ones are
+            // bare VOCAB leaves (checked AFTER resolution, so a name/place
+            // that started out tagged VOCAB but got reclassified to
+            // PERSON/LOCATION by resolveAndLookupLeaf is correctly treated
+            // as an anchor here, not a soft term).
+            List<Set<Long>> vocabResults = new ArrayList<>();
+            List<Set<Long>> anchorResults = new ArrayList<>();
+            Set<Long> strict = null;
+
+            for (SearchExpression child : node.getMust()) {
+                Set<Long> childResult = classifyAndEvaluate(child, knownNames, knownLocations, universe);
+                if (strict == null) {
+                    strict = new HashSet<>(childResult);
+                } else {
+                    strict.retainAll(childResult);
+                }
+
+                boolean isVocabLeaf = child.isLeaf() && "VOCAB".equals(child.getTerm().getDomain());
+                if (isVocabLeaf) {
+                    vocabResults.add(childResult);
+                } else {
+                    anchorResults.add(childResult);
+                }
+            }
+
+            if (strict.isEmpty() && vocabResults.size() >= 2) {
+                // Strict AND across this must-group came back empty, and
+                // there are 2+ plain descriptive terms in it -- these are
+                // inherently the least reliable part of the query (image
+                // captioning/keyword generation is not exhaustive per
+                // photo), so as a LAST-RESORT fallback (never triggered
+                // when the strict result was already non-empty, so nothing
+                // that currently works can regress) relax just those
+                // descriptive terms to "any one of them is enough", while
+                // any PERSON/LOCATION/DATE/TIME anchor in the same group
+                // stays a hard, fully-required filter.
+                Set<Long> vocabUnion = new HashSet<>();
+                for (Set<Long> r : vocabResults) vocabUnion.addAll(r);
+
+                Set<Long> fallback = new HashSet<>(vocabUnion);
+                for (Set<Long> anchor : anchorResults) fallback.retainAll(anchor);
+
+                System.out.println("[SearchService] strict AND across " + node.getMust().size()
+                        + " term(s) was empty (" + vocabResults.size()
+                        + " were plain descriptive terms) -- falling back to \"any one of them\" "
+                        + "(any PERSON/LOCATION/DATE/TIME term stays required); fallback matches="
+                        + fallback.size());
+
+                result = fallback;
             } else {
-                result.retainAll(childResult);
+                result = strict;
             }
         }
+
         boolean hasPositive = node.getTerm() != null || hasMust;
         if (result == null) result = new HashSet<>();
 
@@ -175,6 +227,7 @@ public class SearchService {
             }
             result.removeAll(mustNotUnion);
         }
+
         return result;
     }
 

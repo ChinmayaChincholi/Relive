@@ -34,14 +34,17 @@ import java.util.regex.Pattern;
  *   NOT_TRIGGERS / OR_TRIGGERS / AND_TRIGGERS below). Phrasing outside
  *   this list is read as plain VOCAB text, not an operator --- e.g. "aside
  *   from X" won't be recognized as negation the way an LLM would infer it.
- * - Once a query enters NOT or OR mode, a bare "and"/"or" immediately
- *   after does NOT switch the mode back --- it's read as "also this, same
- *   bucket". This is what makes "sasha and abraham" both land in
- *   must_not for "... without sasha and abraham". Only clause punctuation
- *   (, ; .) resets back to the default AND mode. Mixing OR and NOT in one
- *   clause with no punctuation between them is a rare, genuinely
- *   ambiguous case; the conservative choice is to keep whatever mode was
- *   already active rather than guess at a switch.
+ * - Once a query enters NOT mode, a bare "and"/"or" immediately after does
+ *   NOT switch the mode back --- it's read as "also this, same bucket".
+ *   This is what makes "sasha and abraham" both land in must_not for
+ *   "... without sasha and abraham". Only clause punctuation (, ; .)
+ *   resets back to the default AND mode.
+ * - A comma-separated OR list ("a beach, a park, or a forest") is not
+ *   specially recognized as a single three-way OR --- the comma resets to
+ *   AND mode, so only the pair immediately around the final bare "or" is
+ *   treated as alternatives. This is a known gap, distinct from the
+ *   two/three-way bare "A or B [or C]" case (with no commas), which IS
+ *   handled correctly (see buildTree's OR_TRIGGERS handling below).
  * - A date/time expression needs a year (for dates) somewhere in it to be
  *   treated as DATE; otherwise it's left as ordinary VOCAB text, matching
  *   the same fallback Advanced Search's LLM prompt is instructed to use.
@@ -50,6 +53,10 @@ import java.util.regex.Pattern;
  *   actually something Advanced Search's LLM is explicitly told NOT to
  *   attempt itself (it's told never to compute exact month lengths) --- so
  *   this pipeline is, if anything, more precise for that specific case.
+ * - A literal clock time (e.g. "9:25 am", "3 pm") is only recognized when
+ *   it carries either an explicit colon-separated minute or an explicit
+ *   am/pm marker --- a bare number is never treated as a time, so it can
+ *   never collide with an unrelated numeric term elsewhere in a query.
  */
 public final class DeterministicQueryParser {
 
@@ -65,10 +72,21 @@ public final class DeterministicQueryParser {
     // SymSpellUtil.STOPWORDS: that list exists purely to protect spelling
     // correction and includes "and"/"or"/"not"/"but", which we need as
     // live structural signals here, not noise to discard.
+    //
+    // "taken" and "between" were added after discovering that time-based
+    // queries like "photos taken at 9:25 am" and "photos taken between
+    // 2:30 pm and 6:40 pm" were leaking "taken"/"between" through as
+    // ordinary VOCAB terms with zero matches, which silently zeroed out
+    // the entire AND'd result even when the actual date/time term
+    // resolved correctly. Neither word is used as a structural trigger
+    // anywhere else in this class, and "between" is already fully
+    // consumed by tryParseRange whenever a range successfully parses ---
+    // this only affects the fallback path where it doesn't.
     private static final Set<String> FILLER_WORDS = Set.of(
             "photo", "photos", "picture", "pictures", "image", "images", "pic", "pics",
             "me", "my", "give", "show", "find", "of", "the", "a", "an",
-            "in", "on", "at", "with", "for", "to", "from", "either", "but", "also"
+            "in", "on", "at", "with", "for", "to", "from", "either", "but", "also",
+            "taken", "between"
     );
 
     // Deliberately IDENTICAL to QueryTreeRepair.NEGATION_TRIGGERS --- kept
@@ -76,11 +94,8 @@ public final class DeterministicQueryParser {
     // would have to fix instead parses correctly here from the start, and
     // so both pipelines agree on what counts as negation.
     private static final Set<String> NOT_TRIGGERS = Set.of("without", "excluding", "except", "not");
-
     private static final Set<String> OR_TRIGGERS = Set.of("or");
-
     private static final Set<String> AND_TRIGGERS = Set.of("and");
-
     private static final Set<String> CLAUSE_BOUNDARIES = Set.of(",", ";", ".");
 
     private static final Set<String> MONTHS = Set.of(
@@ -110,8 +125,17 @@ public final class DeterministicQueryParser {
             "night", new String[]{"21:00", "04:59"}
     );
 
-    private static final Pattern TOKEN_PATTERN = Pattern.compile("[a-zA-Z0-9]+|[,;.]");
+    // ':' added so a literal clock time like "9:25" tokenizes as one
+    // token instead of shredding into "9" and "25". Never collides with
+    // anything else --- ':' was not previously meaningful to this class
+    // in any way (not a clause boundary, not a trigger word).
+    private static final Pattern TOKEN_PATTERN = Pattern.compile("[a-zA-Z0-9:]+|[,;.]");
     private static final Pattern DAY_PATTERN = Pattern.compile("(\\d{1,2})(?:st|nd|rd|th)?");
+
+    // Matches "9", "9:25", "9am", "9:25am" (am/pm fused into the same
+    // token) as well as "9" / "9:25" on their own (am/pm may instead be
+    // the NEXT token --- see tryParseLiteralTimeAtom).
+    private static final Pattern LITERAL_TIME_PATTERN = Pattern.compile("(\\d{1,2})(?::(\\d{2}))?(am|pm)?");
 
     private static final int MODE_AND = 0;
     private static final int MODE_OR = 1;
@@ -174,6 +198,13 @@ public final class DeterministicQueryParser {
                 continue;
             }
 
+            TimeAtom literalTime = tryParseLiteralTimeAtom(tokens, i);
+            if (literalTime != null) {
+                out.add(timeLeaf(literalTime.value, literalTime.value));
+                i = literalTime.endIndex;
+                continue;
+            }
+
             out.add(word);
             i++;
         }
@@ -203,13 +234,23 @@ public final class DeterministicQueryParser {
         return rm;
     }
 
-    /** Tries "between A and B" / "from A to B" / "A to B", for both date and time-of-day atoms. */
+    // A parsed literal clock time, e.g. "9:25 am" -> value="09:25".
+    private static final class TimeAtom {
+        String value;   // "HH:MM", 24-hour
+        int endIndex;
+    }
+
+    /** Tries "between A and B" / "from A to B" / "A to B", for date atoms,
+     *  TIME_OF_DAY word atoms, and literal clock-time atoms alike. */
     private static RangeMatch tryParseRange(List<String> tokens, int start) {
         if (start >= tokens.size()) return null;
 
         if (tokens.get(start).equals("between")) {
             RangeMatch time = tryParseTimeRange(tokens, start + 1, "and");
             if (time != null) return time;
+
+            RangeMatch literalTime = tryParseLiteralTimeRange(tokens, start + 1, "and");
+            if (literalTime != null) return literalTime;
 
             DateAtom a = tryParseDateAtom(tokens, start + 1);
             if (a != null && a.endIndex < tokens.size() && tokens.get(a.endIndex).equals("and")) {
@@ -227,6 +268,9 @@ public final class DeterministicQueryParser {
         RangeMatch time = tryParseTimeRange(tokens, atomStart, "to");
         if (time != null) return time;
 
+        RangeMatch literalTime = tryParseLiteralTimeRange(tokens, atomStart, "to");
+        if (literalTime != null) return literalTime;
+
         DateAtom a = tryParseDateAtom(tokens, atomStart);
         if (a != null && a.endIndex < tokens.size() && tokens.get(a.endIndex).equals("to")) {
             DateAtom b = tryParseDateAtom(tokens, a.endIndex + 1);
@@ -242,17 +286,82 @@ public final class DeterministicQueryParser {
         if (start >= tokens.size()) return null;
         String w0 = tokens.get(start);
         if (!TIME_OF_DAY.containsKey(w0)) return null;
-
         int joinerIdx = start + 1;
         if (joinerIdx >= tokens.size() || !tokens.get(joinerIdx).equals(joiner)) return null;
-
         int secondIdx = joinerIdx + 1;
         if (secondIdx >= tokens.size()) return null;
         String w1 = tokens.get(secondIdx);
         if (!TIME_OF_DAY.containsKey(w1)) return null;
-
         TermLeaf leaf = timeLeaf(TIME_OF_DAY.get(w0)[0], TIME_OF_DAY.get(w1)[1]);
         return rangeMatch(leaf, secondIdx + 1);
+    }
+
+    /** Tries "A <joiner> B" where A and B are both literal clock times,
+     *  e.g. "2:30 pm and 6:40 pm" or "3 pm and 5 pm". */
+    private static RangeMatch tryParseLiteralTimeRange(List<String> tokens, int start, String joiner) {
+        TimeAtom a = tryParseLiteralTimeAtom(tokens, start);
+        if (a == null) return null;
+        if (a.endIndex >= tokens.size() || !tokens.get(a.endIndex).equals(joiner)) return null;
+        TimeAtom b = tryParseLiteralTimeAtom(tokens, a.endIndex + 1);
+        if (b == null) return null;
+        TermLeaf leaf = timeLeaf(a.value, b.value);
+        return rangeMatch(leaf, b.endIndex);
+    }
+
+    /**
+     * Recognizes a literal clock time at {@code start}: "9:25", "9:25am",
+     * "9:25 am", "9am", or "9 am". Deliberately requires either a
+     * colon-separated minute component OR an explicit am/pm marker (fused
+     * into the same token or as the very next token) --- a bare number
+     * like "9" on its own is never treated as a time, so this can never
+     * misfire on an unrelated number elsewhere in a query.
+     */
+    private static TimeAtom tryParseLiteralTimeAtom(List<String> tokens, int start) {
+        if (start >= tokens.size()) return null;
+        Matcher m = LITERAL_TIME_PATTERN.matcher(tokens.get(start));
+        if (!m.matches()) return null;
+
+        int hour;
+        try {
+            hour = Integer.parseInt(m.group(1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        Integer minute = m.group(2) != null ? Integer.parseInt(m.group(2)) : null;
+        String meridiem = m.group(3); // fused "am"/"pm", or null
+        int endIndex = start + 1;
+
+        if (meridiem == null && start + 1 < tokens.size()) {
+            String next = tokens.get(start + 1);
+            if (next.equals("am") || next.equals("pm")) {
+                meridiem = next;
+                endIndex = start + 2;
+            }
+        }
+
+        // Require a colon OR an explicit am/pm --- otherwise this is just
+        // an ordinary number, not a time.
+        if (minute == null && meridiem == null) return null;
+        if (minute == null) minute = 0;
+        if (minute < 0 || minute > 59) return null;
+
+        int hour24;
+        if (meridiem != null) {
+            if (hour < 1 || hour > 12) return null;
+            if (meridiem.equals("am")) {
+                hour24 = (hour == 12) ? 0 : hour;
+            } else {
+                hour24 = (hour == 12) ? 12 : hour + 12;
+            }
+        } else {
+            if (hour < 0 || hour > 23) return null;
+            hour24 = hour;
+        }
+
+        TimeAtom atom = new TimeAtom();
+        atom.value = String.format("%02d:%02d", hour24, minute);
+        atom.endIndex = endIndex;
+        return atom;
     }
 
     private static DateAtom tryParseDateAtom(List<String> tokens, int start) {
@@ -369,6 +478,7 @@ public final class DeterministicQueryParser {
         } else {
             endValue = "31-12-" + yearB;
         }
+
         return dateLeaf(startValue, endValue);
     }
 
@@ -389,7 +499,7 @@ public final class DeterministicQueryParser {
         TermLeaf leaf = new TermLeaf();
         leaf.setDomain("TIME");
         leaf.setValue(start);
-        leaf.setRangeEnd(end); // always a real window, even for a single time-of-day word
+        leaf.setRangeEnd(end); // always a real window, even for a single time-of-day word / literal time
         return leaf;
     }
 
@@ -427,13 +537,11 @@ public final class DeterministicQueryParser {
             if (n < 2) continue;
             for (int i = 0; i + n <= result.size(); i++) {
                 if (!isConsumableStringRun(result, consumed, i, n)) continue;
-
                 StringBuilder joined = new StringBuilder();
                 for (int j = 0; j < n; j++) {
                     if (j > 0) joined.append(' ');
                     joined.append((String) result.get(i + j));
                 }
-
                 if (JaroWinklerUtil.similarity(joined.toString(), phrase) >= JaroWinklerUtil.DEFAULT_THRESHOLD) {
                     TermLeaf leaf = new TermLeaf();
                     leaf.setDomain("VOCAB"); // re-classified correctly downstream, same as every other leaf
@@ -492,7 +600,24 @@ public final class DeterministicQueryParser {
                 continue;
             }
             if (OR_TRIGGERS.contains(token)) {
-                if (mode == MODE_AND) mode = MODE_OR;
+                if (mode == MODE_AND) {
+                    mode = MODE_OR;
+                    // "A or B": A was tentatively placed in mustList a
+                    // moment ago under the AND assumption that held right
+                    // up until this token. Now that we know this is
+                    // actually an OR, move it into shouldList so the pair
+                    // becomes a real two-way OR instead of an accidental
+                    // "A AND (should contain B)". Only the single term
+                    // immediately preceding this trigger is moved, so a
+                    // chained "A or B or C" correctly ends up with all
+                    // three in should (the second "or" is a no-op here
+                    // since mode is already MODE_OR), while "without X or
+                    // Y" is untouched (mode is MODE_NOT, not MODE_AND, so
+                    // this branch never runs).
+                    if (!mustList.isEmpty()) {
+                        shouldList.add(mustList.remove(mustList.size() - 1));
+                    }
+                }
                 continue;
             }
             if (AND_TRIGGERS.contains(token)) {
@@ -534,14 +659,15 @@ public final class DeterministicQueryParser {
 
     private static SearchExpression assembleRoot(List<SearchExpression> must, List<SearchExpression> should,
                                                  List<SearchExpression> mustNot) {
-        // Flatten to a single bare leaf for a plain one-term query --- same
-        // shape Advanced Search's own single-term example produces.
+        // Flatten to a single bare leaf for a plain one-term query ---
+        // same shape Advanced Search's own single-term example produces.
         if (must.size() == 1 && should.isEmpty() && mustNot.isEmpty()) {
             return must.get(0);
         }
         if (must.isEmpty() && should.size() == 1 && mustNot.isEmpty()) {
             return should.get(0);
         }
+
         SearchExpression root = new SearchExpression();
         root.getMust().addAll(must);
         root.getShould().addAll(should);

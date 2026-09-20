@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import com.relive.project.dto.UploadResultDTO;
 
 import java.io.File;
 import java.io.IOException;
@@ -41,12 +42,18 @@ public class MediaUploadService {
         return "File uploaded. Processing started.";
     }
 
-    public String uploadMultiple(List<MultipartFile> files) throws IOException {
+    public UploadResultDTO uploadMultiple(List<MultipartFile> files) throws IOException {
+        List<Long> mediaIds = new ArrayList<>();
         List<CompletableFuture<Void>> futures = new ArrayList<>();
+        int skipped = 0;
 
         for (MultipartFile file : files) {
             Long mediaId = saveAndQueue(file);
-            if (mediaId == null) continue; // duplicate, skipped
+            if (mediaId == null) {
+                skipped++;
+                continue;
+            }
+            mediaIds.add(mediaId);
             String path = mediaRepository.findById(mediaId).get().getFilePath();
             futures.add(mediaProcessingService.processMedia(mediaId, path));
         }
@@ -54,7 +61,7 @@ public class MediaUploadService {
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .thenRun(this::onBatchComplete);
 
-        return files.size() + " files uploaded. Processing started.";
+        return new UploadResultDTO(mediaIds, skipped);
     }
 
     /** Runs once after every file in a batch (including a batch of one) has
@@ -67,46 +74,28 @@ public class MediaUploadService {
     }
 
     private Long saveAndQueue(MultipartFile file) throws IOException {
-        try {
-            String fileHash = calculateFileHash(file);
+        String fileHash = calculateFileHash(file);
+        Optional<Media> existing = mediaRepository.findByFileHash(fileHash);
+        if (existing.isPresent()) return null; // legitimate duplicate — fine as-is
 
-            Optional<Media> existing = mediaRepository.findByFileHash(fileHash);
-            if (existing.isPresent()) return null;
+        // everything below here should be allowed to throw, not be swallowed
+        File directory = new File(uploadDir);
+        if (!directory.exists()) directory.mkdirs();
+        String originalName = file.getOriginalFilename();
+        String extension = (originalName != null && originalName.contains("."))
+                ? originalName.substring(originalName.lastIndexOf(".")) : "";
+        String uniqueFileName = UUID.randomUUID() + extension;
+        String absolutePath = directory.getAbsolutePath() + File.separator + uniqueFileName;
+        file.transferTo(new File(absolutePath));
 
-            File directory = new File(uploadDir);
-            if (!directory.exists()) directory.mkdirs();
-
-            String originalName = file.getOriginalFilename();
-            String extension = "";
-            if (originalName != null && originalName.contains(".")) {
-                extension = originalName.substring(originalName.lastIndexOf("."));
-            }
-
-            String uniqueFileName = UUID.randomUUID() + extension;
-            String absolutePath = directory.getAbsolutePath() + File.separator + uniqueFileName;
-
-            File destination = new File(absolutePath);
-            file.transferTo(destination);
-
-            String mediaType = (file.getContentType() != null && file.getContentType().startsWith("image"))
-                    ? "IMAGE" : "VIDEO";
-
-            Media media = Media.builder()
-                    .fileName(originalName)
-                    .filePath(absolutePath)
-                    .mediaType(mediaType)
-                    .uploadedAt(LocalDateTime.now())
-                    .status("PROCESSING")
-                    .fileHash(fileHash)
-                    .build();
-
-            mediaRepository.save(media);
-            return media.getId();
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        }
+        String mediaType = (file.getContentType() != null && file.getContentType().startsWith("image"))
+                ? "IMAGE" : "VIDEO";
+        Media media = Media.builder()
+                .fileName(originalName).filePath(absolutePath).mediaType(mediaType)
+                .uploadedAt(LocalDateTime.now()).status("PROCESSING").fileHash(fileHash)
+                .build();
+        mediaRepository.save(media);
+        return media.getId();
     }
 
     private String calculateFileHash(MultipartFile file) {

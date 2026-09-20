@@ -1,11 +1,11 @@
 import api from "../api/api";
 
 export const uploadFolder = async (formData) => {
-  const res = await api.post("/media/upload-folder", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  if (!res.data.success) throw new Error(res.data.message);
-  return res.data.message;
+    const res = await api.post("/media/upload-folder", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+    });
+    if (!res.data.success) throw new Error(res.data.message);
+    return { message: res.data.message, mediaIds: res.data.data.mediaIds };
 };
 
 export const getMyMedia = async () => {

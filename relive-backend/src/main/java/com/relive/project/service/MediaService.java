@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import com.relive.project.dto.UploadResultDTO;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -39,7 +40,7 @@ public class MediaService {
         return mediaRepository.findAll();
     }
 
-    public String uploadMultiple(List<MultipartFile> files) throws IOException {
+    public UploadResultDTO uploadMultiple(List<MultipartFile> files) throws IOException {
         return mediaUploadService.uploadMultiple(files);
     }
 

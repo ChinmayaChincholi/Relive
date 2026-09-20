@@ -29,3 +29,18 @@ export const deletePerson = async (personId) => {
   if (!res.data.success) throw new Error(res.data.message);
   return res.data;
 };
+
+export const getCropsForPerson = async (personId) => {
+    const res = await api.get(`/faces/person/${personId}/crops`);
+    if (!res.data.success) throw new Error(res.data.message);
+    return res.data.data;
+};
+
+export const splitFaces = async (embeddingIds, targetPersonId) => {
+    const res = await api.post("/faces/split", {
+        embeddingIds,
+        targetPersonId: targetPersonId || null,
+    });
+    if (!res.data.success) throw new Error(res.data.message);
+    return res.data;
+};

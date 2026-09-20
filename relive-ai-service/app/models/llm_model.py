@@ -53,6 +53,7 @@ def _try_load(model_name: str):
         filename=gguf_file,
         n_ctx=LLM_CONTEXT_WINDOW,
         n_threads=os.cpu_count(),
+        use_mmap=False,
         verbose=True,
     )
     print(f"[llm_model] Loaded {model_name}.")

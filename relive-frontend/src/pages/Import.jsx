@@ -4,7 +4,7 @@ import AppLayout from '../components/AppLayout';
 
 // Realistic per-image processing time estimate in seconds (Qwen2.5-VL vocabulary
 // generation + RF-DETR/D-FINE object detection + InsightFace face extraction)
-const SECONDS_PER_IMAGE = 25;
+const SECONDS_PER_IMAGE = 12 * 60;
 
 function formatTime(seconds) {
   if (seconds < 60) return `~${Math.round(seconds)}s`;
@@ -19,27 +19,36 @@ export default function Import() {
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [message, setMessage] = useState('');
   const [queue, setQueue] = useState([]);
+  const [batchMediaIds, setBatchMediaIds] = useState([]);
   const [dragOver, setDragOver] = useState(false);
   const [showDonePopup, setShowDonePopup] = useState(false);
   const prevProcessingCountRef = useRef(0);
 
   const fetchQueue = useCallback(() => {
     getMyMedia().then(data => {
+      const batchIdSet = new Set(batchMediaIds);
+      // Always show what's genuinely processing right now, regardless of
+      // whether it came from *this* upload — fixes the blank-queue bug
+      // when files are duplicates or the backend re-queued old items on restart.
       const processing = data.filter(m => m.status === 'PROCESSING');
-      const completed = data.filter(m => m.status === 'COMPLETED');
-
-      // If we were processing and now everything is done, show popup
+      // Keep "done" scoped to this batch so the completion popup doesn't
+      // fire for unrelated media that finished ages ago.
+      const completed = batchMediaIds.length > 0
+        ? data.filter(m => batchIdSet.has(m.id) && m.status === 'COMPLETED')
+        : [];
       if (prevProcessingCountRef.current > 0 && processing.length === 0 && completed.length > 0) {
         setShowDonePopup(true);
       }
       prevProcessingCountRef.current = processing.length;
-
       setQueue([
         ...processing.map(m => ({ ...m, display: 'processing' })),
-        ...completed.slice(0, 5).map(m => ({ ...m, display: 'done' })),
+        ...completed.map(m => ({ ...m, display: 'done' })),
       ]);
-    }).catch(() => {});
-  }, []);
+    }).catch(err => {
+      console.error('Failed to fetch media queue:', err);
+      setMessage('Could not load processing status. Check that the backend is running.');
+    });
+  }, [batchMediaIds]);
 
   useEffect(() => {
     fetchQueue();
@@ -48,34 +57,28 @@ export default function Import() {
   }, [fetchQueue]);
 
   const handleFiles = async (files) => {
-    const arr = Array.from(files);
-    if (!arr.length) return;
+      const arr = Array.from(files);
+      if (!arr.length) return;
 
-    setUploading(true);
-    setProgress({ current: 0, total: arr.length });
-    let skipped = 0, failed = 0;
+      setUploading(true);
+      setProgress({ current: 0, total: arr.length });
+      setMessage(`Uploading ${arr.length} file${arr.length === 1 ? '' : 's'}...`);
 
-    for (let i = 0; i < arr.length; i++) {
-      setProgress({ current: i + 1, total: arr.length });
-      setMessage(`Uploading ${i + 1} of ${arr.length}: ${arr[i].name}`);
       try {
-        const fd = new FormData();
-        fd.append('files', arr[i]);
-        const res = await uploadFolder(fd);
-        if (res && res.includes('already exists')) skipped++;
-      } catch { failed++; }
-    }
+          const fd = new FormData();
+          arr.forEach(file => fd.append('files', file));
+          const res = await uploadFolder(fd);
+          setBatchMediaIds(res.mediaIds); // this import's IDs become the new scope for progress
+          setMessage((res.message || 'Upload complete') + ' Processing in background...');
+      } catch {
+          setMessage('Upload failed. Please try again.');
+      }
 
-    const uploaded = arr.length - skipped - failed;
-    let summary = `Done! ${uploaded} uploaded`;
-    if (skipped > 0) summary += `, ${skipped} skipped`;
-    if (failed > 0) summary += `, ${failed} failed`;
-    setMessage(summary + '. Processing in background...');
-    setUploading(false);
-    setProgress({ current: 0, total: 0 });
-    fileInputRef.current.value = '';
+      setUploading(false);
+      setProgress({ current: 0, total: 0 });
+      fileInputRef.current.value = '';
 
-    setTimeout(fetchQueue, 1000);
+      setTimeout(fetchQueue, 1000);
   };
 
   const processingItems = queue.filter(q => q.display === 'processing');

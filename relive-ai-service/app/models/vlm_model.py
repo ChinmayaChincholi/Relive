@@ -77,6 +77,7 @@ def _try_load(model_name: str):
         chat_handler=chat_handler,
         n_ctx=VLM_CONTEXT_WINDOW,
         n_threads=os.cpu_count(),
+        use_mmap=False,
         verbose=False,
     )
     print(f"[vlm_model] Loaded {model_name}.")
@@ -117,7 +118,7 @@ _VOCAB_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "scratchpad": {"type": "string"},
+                    "scratchpad": {"type": "string", "maxLength": 500},
                     "words": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -211,7 +212,9 @@ def generate_vocabulary(image: Image.Image) -> list[str]:
 
     grammar = LlamaGrammar.from_json_schema(json.dumps(_VOCAB_SCHEMA))
     with _llm_lock:
+        print(f"[vlm_model] pre-reset n_tokens={_llm.n_tokens}")
         _llm.reset()
+        print(f"[vlm_model] post-reset n_tokens={_llm.n_tokens}")
         completion = _llm.create_chat_completion(
             messages=messages,
             grammar=grammar,
@@ -220,6 +223,8 @@ def generate_vocabulary(image: Image.Image) -> list[str]:
             top_p=VLM_VOCAB_TOP_P,
         )
     raw_text = completion["choices"][0]["message"]["content"]
+    usage = completion.get("usage", {})
+    print(f"[vlm_model] usage={usage} max_tokens_requested={max_tokens}")
 
     all_words: set[str] = set()
     try:
@@ -229,6 +234,8 @@ def generate_vocabulary(image: Image.Image) -> list[str]:
             words = [str(w).strip().lower() for w in entry.get("words", []) if str(w).strip()]
             all_words.update(words)
     except Exception as e:
-        print(f"[vlm_model] Vocabulary parse failed: {e}")
+        print(f"[vlm_model] Vocabulary parse failed: {e} (raw output length={len(raw_text)} chars)")
+        print(f"[vlm_model] Raw failed output: {raw_text!r}")
 
     return sorted(all_words)
+

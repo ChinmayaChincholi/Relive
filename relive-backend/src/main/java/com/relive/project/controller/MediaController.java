@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import com.relive.project.dto.UploadResultDTO;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -33,11 +34,15 @@ public class MediaController {
     }
 
     @PostMapping("/upload-folder")
-    public ApiResponse<String> uploadFolder(
+    public ApiResponse<UploadResultDTO> uploadFolder(
             @RequestParam("files") List<MultipartFile> files
     ) throws Exception {
-        String message = mediaService.uploadMultiple(files);
-        return new ApiResponse<>(true, message, null);
+        UploadResultDTO result = mediaService.uploadMultiple(files);
+        String message = result.getMediaIds().size() + " file" + (result.getMediaIds().size() == 1 ? "" : "s") + " uploaded";
+        if (result.getSkipped() > 0) {
+            message += ", " + result.getSkipped() + " skipped (already exists)";
+        }
+        return new ApiResponse<>(true, message + ". Processing started.", result);
     }
 
     @GetMapping("/my")

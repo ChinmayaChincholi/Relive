@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.relive.project.dto.FaceCropDTO;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -91,5 +92,24 @@ public class FaceController {
         return ResponseEntity.ok()
                 .contentType(MediaType.IMAGE_JPEG)
                 .body(imageBytes);
+    }
+
+    @GetMapping("/person/{personId}/crops")
+    public ApiResponse<List<FaceCropDTO>> getCropsForPerson(@PathVariable Long personId) {
+        List<FaceCropDTO> crops = faceService.getCropsForPerson(personId);
+        return new ApiResponse<>(true, "Crops fetched", crops);
+    }
+
+    @PostMapping("/split")
+    public ApiResponse<String> splitFaces(@RequestBody Map<String, Object> body) {
+        @SuppressWarnings("unchecked")
+        List<Long> embeddingIds = ((List<Object>) body.get("embeddingIds")).stream()
+                .map(o -> Long.valueOf(o.toString()))
+                .collect(java.util.stream.Collectors.toList());
+        Long targetPersonId = body.get("targetPersonId") != null
+                ? Long.valueOf(body.get("targetPersonId").toString())
+                : null;
+        faceService.splitFaces(embeddingIds, targetPersonId);
+        return new ApiResponse<>(true, "Faces split successfully", null);
     }
 }

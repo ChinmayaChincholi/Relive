@@ -145,8 +145,10 @@ MIN_FACE_SIZE = 30
 MAX_IMAGE_DIMENSION = 1280
 
 FACE_CLUSTER_MIN_CLUSTER_SIZE = 2
-FACE_CLUSTER_MIN_SAMPLES = 2
+FACE_CLUSTER_MIN_SAMPLES = 5
 FACE_CLUSTER_METRIC = "euclidean"
+FACE_CLUSTER_SELECTION_METHOD = "leaf"  # was implicitly "eom" (default)
+FACE_CLUSTER_SELECTION_EPSILON = 0.0    # explicit
 
 # ---------------------------------------------------------------------------
 # Hardware tiers are informational only. Every model loader always ATTEMPTS

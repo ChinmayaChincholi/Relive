@@ -3,6 +3,7 @@ package com.relive.project.service;
 import com.relive.project.client.FaceClient;
 import com.relive.project.dto.FacePersonDTO;
 import com.relive.project.entity.*;
+import com.relive.project.dto.FaceCropDTO;
 import com.relive.project.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -122,22 +123,36 @@ public class FaceService {
             Map<Integer, List<FaceEmbedding>> clusters = new HashMap<>();
             for (int i = 0; i < labels.size(); i++) {
                 int label = labels.get(i);
-                if (label == -1) continue; // HDBSCAN noise — leave ungrouped for now
+                if (label == -1) continue; // HDBSCAN noise --- leave ungrouped for now
                 clusters.computeIfAbsent(label, k -> new ArrayList<>()).add(unnamedPool.get(i));
             }
 
+            // For each new cluster, find which existing FacePerson (if any) it should
+            // attach to. A cluster whose members span MORE THAN ONE distinct existing
+            // person is a conflict --- HDBSCAN has grouped together faces that were
+            // previously (and possibly correctly) assigned to different people. We
+            // never auto-resolve that by picking whichever person we saw first; we
+            // flag it and leave that cluster's existing assignments untouched.
             Map<Integer, FacePerson> clusterToExistingPerson = new HashMap<>();
+            Set<Integer> conflictedClusters = new HashSet<>();
             for (Map.Entry<Integer, List<FaceEmbedding>> entry : clusters.entrySet()) {
                 for (FaceEmbedding fe : entry.getValue()) {
                     if (fe.getPerson() != null) {
+                        FacePerson existing = clusterToExistingPerson.get(entry.getKey());
+                        if (existing != null && !existing.getId().equals(fe.getPerson().getId())) {
+                            conflictedClusters.add(entry.getKey());
+                            System.out.println("[FaceService] CONFLICT in cluster " + entry.getKey() +
+                                    ": spans person " + existing.getId() + " and person " + fe.getPerson().getId() +
+                                    " -- skipping auto-merge for this cluster.");
+                        }
                         clusterToExistingPerson.put(entry.getKey(), fe.getPerson());
-                        break;
                     }
                 }
             }
 
             for (Map.Entry<Integer, List<FaceEmbedding>> entry : clusters.entrySet()) {
                 int clusterLabel = entry.getKey();
+                if (conflictedClusters.contains(clusterLabel)) continue; // leave existing assignments untouched
                 List<FaceEmbedding> clusterEmbeddings = entry.getValue();
 
                 FacePerson person = clusterToExistingPerson.get(clusterLabel);
@@ -159,7 +174,8 @@ public class FaceService {
                 }
             }
 
-            System.out.println("Unnamed-pool clustering complete. Clusters: " + clusters.size());
+            System.out.println("Unnamed-pool clustering complete. Clusters: " + clusters.size() +
+                    (conflictedClusters.isEmpty() ? "" : " (" + conflictedClusters.size() + " skipped due to conflict)"));
 
         } catch (Exception e) {
             System.out.println("Face clustering failed: " + e.getMessage());
@@ -300,16 +316,38 @@ public class FaceService {
                 .filter(fe -> fe.getPerson() != null)
                 .collect(Collectors.toList());
 
+        // Group by person, compute each person's centroid, compare against
+        // the centroid instead of any single embedding -- prevents one
+        // atypical photo from single-handedly pulling in a different face.
+        Map<FacePerson, List<double[]>> byPerson = new HashMap<>();
+        for (FaceEmbedding fe : assigned) {
+            byPerson.computeIfAbsent(fe.getPerson(), k -> new ArrayList<>())
+                    .add(parseEmbedding(fe.getEmbeddingCsv()));
+        }
+
         FacePerson bestMatch = null;
         double bestScore = PERSON_MATCH_THRESHOLD;
 
-        for (FaceEmbedding candidate : assigned) {
-            double[] candidateVec = parseEmbedding(candidate.getEmbeddingCsv());
-            double similarity = cosineSimilarity(newVec, candidateVec);
-            if (similarity > bestScore) {
-                bestScore = similarity;
-                bestMatch = candidate.getPerson();
+        for (Map.Entry<FacePerson, List<double[]>> entry : byPerson.entrySet()) {
+            List<double[]> vecs = entry.getValue();
+            double[] centroid = new double[newVec.length];
+            for (double[] v : vecs) {
+                for (int i = 0; i < v.length; i++) centroid[i] += v[i];
             }
+            for (int i = 0; i < centroid.length; i++) centroid[i] /= vecs.size();
+
+            double centroidSim = cosineSimilarity(newVec, centroid);
+            if (centroidSim <= bestScore) continue;
+
+            // Require agreement with the centroid AND the nearest individual
+            // embedding in this person's set, not just one or the other.
+            double nearestIndividual = vecs.stream()
+                    .mapToDouble(v -> cosineSimilarity(newVec, v))
+                    .max().orElse(0.0);
+            if (nearestIndividual <= PERSON_MATCH_THRESHOLD) continue;
+
+            bestScore = centroidSim;
+            bestMatch = entry.getKey();
         }
 
         if (bestMatch != null) {
@@ -339,5 +377,68 @@ public class FaceService {
         }
         if (normA == 0 || normB == 0) return 0;
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    public List<FaceCropDTO> getCropsForPerson(Long personId) {
+        FacePerson person = facePersonRepository.findById(personId)
+                .orElseThrow(() -> new RuntimeException("Person not found"));
+
+        return faceEmbeddingRepository.findByPerson(person).stream()
+                .filter(fe -> fe.getCropPath() != null)
+                .map(fe -> {
+                    FaceCropDTO dto = new FaceCropDTO();
+                    dto.setEmbeddingId(fe.getId());
+                    dto.setCropPath(fe.getCropPath());
+                    dto.setMediaId(fe.getMedia() != null ? fe.getMedia().getId() : null);
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public void splitFaces(List<Long> embeddingIds, Long targetPersonId) {
+        if (embeddingIds == null || embeddingIds.isEmpty()) {
+            throw new RuntimeException("No faces selected to split");
+        }
+
+        List<FaceEmbedding> embeddings = faceEmbeddingRepository.findAllById(embeddingIds);
+        if (embeddings.isEmpty()) {
+            throw new RuntimeException("None of the selected faces were found");
+        }
+
+        // Track which persons these embeddings are being moved AWAY from, so we
+        // can clean up any that end up with zero embeddings afterward.
+        Set<FacePerson> sourcePersons = embeddings.stream()
+                .map(FaceEmbedding::getPerson)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        FacePerson targetPerson;
+        if (targetPersonId != null) {
+            targetPerson = facePersonRepository.findById(targetPersonId)
+                    .orElseThrow(() -> new RuntimeException("Target person not found"));
+        } else {
+            targetPerson = FacePerson.builder().name(null).build();
+            facePersonRepository.save(targetPerson);
+        }
+
+        for (FaceEmbedding fe : embeddings) {
+            fe.setPerson(targetPerson);
+            faceEmbeddingRepository.save(fe);
+        }
+
+        // Same convention as clusterUnnamedPool(): only auto-delete a now-empty
+        // person if they were unnamed. A named person left with zero embeddings
+        // (e.g. the user split every one of their photos away) is left in place
+        // rather than silently deleted --- that's a much bigger, surprising side
+        // effect for something the user may not have intended.
+        for (FacePerson source : sourcePersons) {
+            if (source.getId().equals(targetPerson.getId())) continue;
+            if (isUnnamed(source) && faceEmbeddingRepository.findByPerson(source).isEmpty()) {
+                facePersonRepository.delete(source);
+            }
+        }
+
+        System.out.println("[FaceService] Split " + embeddings.size() + " face(s) into person " + targetPerson.getId());
     }
 }
