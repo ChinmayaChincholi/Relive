@@ -19,11 +19,12 @@ export default function Home() {
       const processing = data.filter(m => m.status === 'PROCESSING').length;
       setProgress({ total, completed, processing });
 
-      // Count unique locations
+      // Count unique places (same grouping the "Your Places" page uses)
       const locs = new Set(
         data
           .filter(m => m.location && m.location.trim())
           .map(m => m.location.split('(')[0].trim())
+          .filter(Boolean)
       );
       setLocationCount(locs.size);
     }).catch(() => {});
@@ -114,13 +115,19 @@ export default function Home() {
         }}>
           {statCard('Total photos', progress.total || '—', progress.total > 0 ? `${progress.processing} processing` : null)}
           {statCard('Processed', progress.completed || '—', progress.total > 0 ? `${Math.round((progress.completed / progress.total) * 100)}% done` : null)}
-          {statCard('People found', people.length || '—', people.filter(p => !p.name).length > 0 ? `${people.filter(p => !p.name).length} unnamed` : 'All named', people.filter(p => !p.name).length > 0 ? '#f59e0b' : '#22c55e')}
           {statCard(
-            'Locations',
+            'Your People',
+            people.length || '—',
+            people.filter(p => !p.name).length > 0 ? `${people.filter(p => !p.name).length} unnamed` : 'All named',
+            people.filter(p => !p.name).length > 0 ? '#f59e0b' : '#22c55e',
+            () => navigate('/faces')
+          )}
+          {statCard(
+            'Places',
             locationCount || '—',
-            locationCount > 0 ? 'View on map →' : 'from metadata',
+            locationCount > 0 ? 'View your places →' : 'from metadata',
             '#f59e0b',
-            locationCount > 0 ? () => navigate('/map') : null
+            locationCount > 0 ? () => navigate('/places') : null
           )}
         </div>
 

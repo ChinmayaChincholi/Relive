@@ -12,9 +12,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import com.relive.project.dto.UploadResultDTO;
+import com.relive.project.util.FileCleanup;
+import org.springframework.beans.factory.annotation.Value;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +34,9 @@ public class MediaService {
     private final MediaKeywordRepository mediaKeywordRepository;
     private final FaceEmbeddingRepository faceEmbeddingRepository;
     private final LocationRepository locationRepository;
+
+    @Value("${relive.data.dir}")
+    private String dataDir;
 
     public String uploadMedia(MultipartFile file) throws IOException {
         return mediaUploadService.uploadMedia(file);
@@ -57,15 +63,7 @@ public class MediaService {
         );
     }
 
-    /**
-     * mode: "instant" routes to the deterministic, no-LLM pipeline;
-     * anything else (including null/blank) keeps today's Advanced Search
-     * behavior, so existing callers that don't pass a mode are unaffected.
-     */
-    public List<Media> searchByNaturalQuery(String query, String mode) {
-        if ("instant".equalsIgnoreCase(mode)) {
-            return searchService.searchInstant(query);
-        }
+    public List<Media> searchByNaturalQuery(String query) {
         return searchService.searchByNaturalQuery(query);
     }
 
@@ -81,6 +79,20 @@ public class MediaService {
                 () -> new RuntimeException("Media not found: " + id)
         );
 
+        // Every file that must leave the disk with this photo: the photo itself
+        // plus each face-crop image cut from it. Collected BEFORE the rows are
+        // deleted (crop paths live in face_embeddings) but only deleted AFTER
+        // the transaction commits, so a rolled-back DB delete can never leave
+        // the database pointing at missing files.
+        List<Path> filesToDelete = new ArrayList<>();
+        if (media.getFilePath() != null) {
+            filesToDelete.add(Paths.get(media.getFilePath()));
+        }
+        for (FaceEmbedding fe : faceEmbeddingRepository.findByMedia(media)) {
+            Path crop = FileCleanup.resolveInside(dataDir, fe.getCropPath());
+            if (crop != null) filesToDelete.add(crop);
+        }
+
         // Orphaned FacePerson cleanup (a person left with zero embeddings
         // once this media's faces are removed) is handled automatically by
         // trg_face_embedding_delete_orphan_person (see
@@ -92,18 +104,8 @@ public class MediaService {
         mediaKeywordRepository.deleteByMedia(media);
         locationRepository.deleteByMedia(media);
 
-        // No AI-service call needed anymore --- there's no external vector
-        // store; everything searchable lives in this database and is
-        // already removed above.
-
-        if (media.getFilePath() != null) {
-            try {
-                Files.deleteIfExists(Paths.get(media.getFilePath()));
-            } catch (IOException e) {
-                System.out.println("Could not delete file from disk: " + media.getFilePath());
-            }
-        }
-
         mediaRepository.delete(media);
+
+        FileCleanup.deleteAfterCommit(filesToDelete);
     }
 }

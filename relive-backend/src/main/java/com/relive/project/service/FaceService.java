@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.relive.project.util.FileCleanup;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -26,7 +27,6 @@ public class FaceService {
 
     @Value("${relive.data.dir}")
     private String dataDir;
-
 
     /** Extracts faces and assigns each to a person via nearest-neighbor
      *  matching — no longer triggers clustering itself; MediaUploadService
@@ -90,8 +90,7 @@ public class FaceService {
         }
     }
 
-
-    /** Renamed from clusterAndAssign. Only embeddings belonging to an
+    /** Only embeddings belonging to an
      *  UNNAMED person are sent for re-clustering — named identities are
      *  never included, so a periodic re-cluster can never silently
      *  reshuffle, split, or merge an identity the user already confirmed. */
@@ -254,17 +253,35 @@ public class FaceService {
         System.out.println("Merged person " + personId2 + " into " + personId1 + " as '" + finalName + "'");
     }
 
+    /**
+     * Deletes a person (named or unnamed) together with all of their face
+     * embeddings AND their face-crop image files on disk.
+     *
+     * Uses bulk SQL deletes because trg_face_embedding_delete_orphan_person
+     * (see DatabaseIntegrityStartupProcessor) already deletes the face_persons
+     * row when its last embedding goes; a Hibernate entity delete of that same
+     * row would then affect 0 rows and roll the whole transaction back. A bulk
+     * delete is simply a no-op in that case.
+     *
+     * Crop files are removed only AFTER the transaction commits.
+     */
     @Transactional
     public void deletePerson(Long personId) {
         FacePerson person = facePersonRepository.findById(personId)
                 .orElseThrow(() -> new RuntimeException("Person not found"));
-        List<FaceEmbedding> embeddings = faceEmbeddingRepository.findByPerson(person);
-        for (FaceEmbedding fe : embeddings) {
-            fe.setPerson(null);
-            faceEmbeddingRepository.save(fe);
-        }
-        faceEmbeddingRepository.deleteAll(embeddings);
-        facePersonRepository.delete(person);
+
+        // Collect the crop files first --- their paths live in face_embeddings.
+        List<Path> cropFiles = faceEmbeddingRepository.findByPerson(person).stream()
+                .map(FaceEmbedding::getCropPath)
+                .map(p -> FileCleanup.resolveInside(dataDir, p))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        faceEmbeddingRepository.deleteAllByPersonId(personId);
+        facePersonRepository.deletePersonById(personId);
+
+        FileCleanup.deleteAfterCommit(cropFiles);
+        System.out.println("[FaceService] Deleted person " + personId + " (" + cropFiles.size() + " crop file(s) queued for removal)");
     }
 
     public List<String> getAllPersonNames() {

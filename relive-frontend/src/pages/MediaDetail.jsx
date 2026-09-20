@@ -33,9 +33,11 @@ export default function MediaDetail() {
       });
   }, [id]);
 
+  // restoreScroll tells the All Photos page to put the user back exactly
+  // where they were in the grid instead of starting at the top.
   const backButton = (
     <button
-      onClick={() => navigate('/media')}
+      onClick={() => navigate('/media', { state: { restoreScroll: true } })}
       style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',
@@ -133,7 +135,6 @@ export default function MediaDetail() {
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: '14px', padding: '20px',
           }}>
-            {detailRow('Caption', media.sceneCaption)}
             {detailRow(
               'Date Taken',
               media.dateTaken
@@ -143,11 +144,6 @@ export default function MediaDetail() {
                 : null
             )}
             {detailRow('Location', media.location)}
-            {detailRow('Event Type', media.eventType)}
-            {detailRow(
-              'Faces Found',
-              media.faceCount != null ? `${media.faceCount} face${media.faceCount !== 1 ? 's' : ''}` : null
-            )}
 
             {people.length > 0 && (
               <div style={{ marginBottom: '4px' }}>
@@ -174,9 +170,7 @@ export default function MediaDetail() {
               </div>
             )}
 
-            {!media.sceneCaption && !media.dateTaken && !media.location &&
-             !media.eventType && (media.faceCount == null || media.faceCount === 0) &&
-             people.length === 0 && (
+            {!media.dateTaken && !media.location && people.length === 0 && (
               <div style={{ fontSize: '12px', color: 'var(--text3)' }}>
                 No additional details available for this photo yet.
               </div>

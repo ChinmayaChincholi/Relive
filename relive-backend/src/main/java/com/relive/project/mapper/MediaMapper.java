@@ -11,12 +11,9 @@ public class MediaMapper {
 
         dto.setId(media.getId());
         dto.setFileName(media.getFileName());
-        dto.setSceneCaption(media.getSceneCaption());
-        dto.setFaceCount(media.getFaceCount());
         dto.setStatus(media.getStatus());
         dto.setDateTaken(media.getDateTaken());
         dto.setLocation(media.getLocation());
-        dto.setEventType(media.getEventType());
         return dto;
     }
 }

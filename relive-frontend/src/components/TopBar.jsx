@@ -37,15 +37,6 @@ export default function TopBar() {
         <span style={{ fontSize: '13px' }}>🔍</span>
         <span>Search your memories...</span>
       </div>
-      <div style={{
-        width: '32px', height: '32px',
-        background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-        borderRadius: '50%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '12px', fontWeight: '700', color: '#1c1004',
-        flexShrink: 0,
-        fontFamily: 'Syne, sans-serif',
-      }}>C</div>
     </div>
   );
 }

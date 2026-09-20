@@ -6,6 +6,7 @@ import Media from './pages/Media';
 import MediaDetail from './pages/MediaDetail';
 import Faces from './pages/Faces';
 import PersonPhotos from './pages/PersonPhotos';
+import Places from './pages/Places';
 import { AskSearchProvider } from './context/AskSearchContext';
 
 function App() {
@@ -21,6 +22,7 @@ function App() {
           <Route path="/media/:id"           element={<MediaDetail />} />
           <Route path="/faces"               element={<Faces />} />
           <Route path="/faces/person/:id"    element={<PersonPhotos />} />
+          <Route path="/places"              element={<Places />} />
           <Route path="*"                    element={<Navigate to="/home" replace />} />
         </Routes>
       </BrowserRouter>

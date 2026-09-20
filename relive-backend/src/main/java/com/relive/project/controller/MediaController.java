@@ -56,18 +56,17 @@ public class MediaController {
 
     @GetMapping("/search-natural")
     public ApiResponse<List<MediaResponseDTO>> searchNatural(
-            @RequestParam String query,
-            @RequestParam(defaultValue = "advanced") String mode
+            @RequestParam String query
     ) {
         long startNanos = System.nanoTime();
         List<MediaResponseDTO> results =
-                mediaService.searchByNaturalQuery(query, mode)
+                mediaService.searchByNaturalQuery(query)
                         .stream()
                         .map(MediaMapper::toDTO)
                         .toList();
         double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
-        System.out.printf("[MediaController] query=\"%s\" mode=%s -> %d result(s) in %.3fs%n",
-                query, mode, results.size(), elapsedSeconds);
+        System.out.printf("[MediaController] query=\"%s\" -> %d result(s) in %.3fs%n",
+                query, results.size(), elapsedSeconds);
         return new ApiResponse<>(true, "Search completed", results);
     }
 

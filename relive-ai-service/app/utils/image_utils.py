@@ -53,8 +53,8 @@ def _country_name_from_code(code: str) -> str:
 def extract_exif_location(image):
     """
     Returns a dict {city, region, country, display} or None. All three
-    granularities (city/region/country) get indexed as separate LOCATION
-    keywords by the backend, so "Bengaluru", "Karnataka", and "India" are
+    granularities (city/region/country) are stored as separate rows in the backend's
+    'locations' table, so "Bengaluru", "Karnataka", and "India" are
     all independently searchable --- not just the combined display string.
     `country` is always a full country name (e.g. "India"), never a raw
     ISO code --- see _country_name_from_code.

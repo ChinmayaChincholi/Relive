@@ -4,9 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 // One row per geocoded granularity per photo (city / region / country),
-// mirroring the existing FacePerson/FaceEmbedding split rather than
-// cramming location data into the general-purpose media_keywords table
-// with a domain discriminator.
+// mirroring the existing FacePerson/FaceEmbedding split rather than storing it in the media_keywords table.
 @Entity
 @Table(name = "locations", indexes = {
         @Index(name = "idx_location_name", columnList = "locationName")

@@ -14,10 +14,10 @@ export const getMyMedia = async () => {
   return res.data.data;
 };
 
-// mode: "advanced" (default, LLM-parsed) or "instant" (deterministic, no LLM).
-export const searchNatural = async (query, mode, signal) => {
+// Natural-language photo search (deterministic, no LLM).
+export const searchNatural = async (query, signal) => {
   const res = await api.get("/media/search-natural", {
-    params: { query, mode },
+    params: { query },
     signal,
   });
   if (!res.data.success) throw new Error(res.data.message);

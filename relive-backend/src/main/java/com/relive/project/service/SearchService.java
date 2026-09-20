@@ -1,6 +1,5 @@
 package com.relive.project.service;
 
-import com.relive.project.client.QueryParserClient;
 import com.relive.project.dto.SearchExpression;
 import com.relive.project.dto.TermLeaf;
 import com.relive.project.entity.Media;
@@ -30,7 +29,6 @@ public class SearchService {
     private final MediaKeywordRepository mediaKeywordRepository;
     private final LocationRepository locationRepository;
     private final FaceService faceService;
-    private final QueryParserClient queryParserClient;
     private final SpellCorrectionService spellCorrectionService;
     private final AtomicLong searchGeneration = new AtomicLong(0);
 
@@ -38,6 +36,14 @@ public class SearchService {
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("dd-MM-yyyy");
     private static final DateTimeFormatter MONTH_YEAR_FORMAT = DateTimeFormatter.ofPattern("MM-yyyy");
 
+    /**
+     * The one and only search pipeline. Spell-corrects the query, builds the
+     * SearchExpression tree with DeterministicQueryParser (runs entirely in
+     * this JVM --- no AI-service call and no LLM involved, so this method
+     * never blocks on anything but the database), then evaluates that tree
+     * against the database via evaluate() / classifyAndEvaluate() /
+     * resolveAndLookupLeaf().
+     */
     public List<Media> searchByNaturalQuery(String rawQuery) {
         long myGeneration = searchGeneration.incrementAndGet();
 
@@ -45,65 +51,16 @@ public class SearchService {
         List<String> knownNames = faceService.getAllPersonNames();
         List<String> knownLocations = locationRepository.findDistinctLocationNames();
 
-        // Change 4 --- a newer query has already started; abandon this one
-        // before even paying for the AI-service round trip.
+        // A newer query has already started; abandon this one.
         if (myGeneration != searchGeneration.get()) {
-            System.out.println("[SearchService] query=\"" + rawQuery + "\" superseded before parsing --- skipping");
-            return Collections.emptyList();
-        }
-
-        SearchExpression tree;
-        try {
-            tree = queryParserClient.parseQuery(corrected);
-        } catch (Exception e) {
-            System.out.println("Query parsing failed: " + e.getMessage());
-            return Collections.emptyList();
-        }
-        if (tree == null) return Collections.emptyList();
-
-        // Change 4 --- a newer query started while this one was blocked on
-        // the AI service. The parse result is now stale; don't spend the
-        // rest of this method evaluating a query the user already moved on
-        // from, and don't let it clobber the newer search's result.
-        if (myGeneration != searchGeneration.get()) {
-            System.out.println("[SearchService] query=\"" + rawQuery + "\" superseded after parsing --- discarding result");
-            return Collections.emptyList();
-        }
-
-        logTree("before repair", tree);
-        QueryTreeRepair.repair(tree, corrected);
-        Set<String> knownKeywords = new HashSet<>(mediaKeywordRepository.findDistinctKeywords());
-        QueryTreeRepair.mergeAdjacentVocab(tree, corrected, knownKeywords);
-        logTree("after repair", tree);
-
-        return evaluate(tree, knownNames, knownLocations, rawQuery);
-    }
-
-    /**
-     * Instant Search --- same spell-corrected text, same known-entity
-     * lists, same evaluator (evaluate() / classifyAndEvaluate() /
-     * resolveAndLookupLeaf()) as Advanced Search. The only difference is
-     * how the SearchExpression tree gets built: DeterministicQueryParser
-     * runs entirely in this JVM, with no AI-service call and no LLM
-     * involved at all, so this method never blocks on anything but the
-     * database.
-     */
-    public List<Media> searchInstant(String rawQuery) {
-        long myGeneration = searchGeneration.incrementAndGet();
-
-        String corrected = spellCorrectionService.correctQuery(rawQuery);
-        List<String> knownNames = faceService.getAllPersonNames();
-        List<String> knownLocations = locationRepository.findDistinctLocationNames();
-
-        if (myGeneration != searchGeneration.get()) {
-            System.out.println("[SearchService][instant] query=\"" + rawQuery + "\" superseded --- skipping");
+            System.out.println("[SearchService] query=\"" + rawQuery + "\" superseded --- skipping");
             return Collections.emptyList();
         }
 
         SearchExpression tree = DeterministicQueryParser.parse(corrected, knownNames, knownLocations);
         Set<String> knownKeywords = new HashSet<>(mediaKeywordRepository.findDistinctKeywords());
         QueryTreeRepair.mergeAdjacentVocab(tree, corrected, knownKeywords);
-        logTree("instant tree", tree);
+        logTree("query tree", tree);
 
         return evaluate(tree, knownNames, knownLocations, rawQuery);
     }

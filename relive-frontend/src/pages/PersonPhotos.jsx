@@ -172,7 +172,7 @@ export default function PersonPhotos() {
                     )}
                 </div>
 
-                {/* Existing photo grid, unchanged */}
+                {/* Photo grid */}
                 {loading ? (
                     <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text3)' }}>
                         Loading photos...

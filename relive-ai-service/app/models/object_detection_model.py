@@ -3,9 +3,7 @@ Object detection fallback (image processing step 12). Two families now:
 RF-DETR for LOW/MID (Apache 2.0, via the `rfdetr` package, unchanged
 mechanism from before), D-FINE-X for HIGH (MIT, via transformers'
 DFineForObjectDetection — no extra package, no PML licensing gate).
-Always attempts HIGH first regardless of detected hardware tier, stepping
-down only on an actual load failure (see design discussion — detection can
-under-report real capability).
+Loading starts at the DETECTED GPU tier and steps down only on an actual load failure.
 """
 
 import numpy as np

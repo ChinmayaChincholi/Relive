@@ -63,15 +63,15 @@ VLM_TOKEN_SAFETY_MARGIN = 150
 # Non-greedy sampling for vocabulary generation specifically. Greedy decoding
 # (temperature=0) reliably converges on the shortest valid answer per
 # category — there's nothing pushing the model to keep enumerating once it's
-# produced something plausible. Query parsing and synonym generation stay
-# deterministic (temperature=0.0) since those need consistency, not breadth;
-# this is the one job where exhaustiveness matters more than determinism.
+# produced something plausible. Synonym generation stays deterministic
+# (temperature=0.0) since that needs consistency, not breadth; this is the
+# one job where exhaustiveness matters more than determinism.
 VLM_VOCAB_TEMPERATURE = 0.6
 VLM_VOCAB_TOP_P = 0.9
 
 # ---------------------------------------------------------------------------
-# TEXT-ONLY model — image retrieval step 2 (query -> expression tree) and
-# image processing step 10 (synonym generation, text-only, no image needed).
+# TEXT-ONLY model — image processing step 10 (synonym generation, text-only,
+# no image needed).
 # Qwen3.5/3.6, used in plain text mode (no chat_handler) — this part never
 # depended on Qwen3-VL vision support, so it's unaffected by the fork issue
 # that pushed the vision model above to Qwen2.5-VL instead.
@@ -100,7 +100,6 @@ LLM_GGUF_FILE_BY_MODEL = {
 }
 LLM_CONTEXT_WINDOW = 8192
 LLM_MAX_NEW_TOKENS_SYNONYMS = 400
-LLM_MAX_NEW_TOKENS_QUERY = 300
 
 # Safety margin for generate_synonyms()'s dynamic max_tokens calculation.
 # Raised from a flat 100 -> 300: 100 tokens of headroom for chat-template
@@ -151,8 +150,7 @@ FACE_CLUSTER_SELECTION_METHOD = "leaf"  # was implicitly "eom" (default)
 FACE_CLUSTER_SELECTION_EPSILON = 0.0    # explicit
 
 # ---------------------------------------------------------------------------
-# Hardware tiers are informational only. Every model loader always ATTEMPTS
-# the HIGH tier first regardless of what tier detection guesses, and only
-# steps down on an actual load failure.
+# Hardware tiers decide where each model loader STARTS: it tries the detected
+# tier first and steps down to a smaller model only on an actual load failure.
 # ---------------------------------------------------------------------------
 print(f"[config] Detected hardware (informational only): {describe_hardware()}")

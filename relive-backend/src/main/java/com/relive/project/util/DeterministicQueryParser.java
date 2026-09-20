@@ -12,76 +12,11 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Instant Search's query -> SearchExpression tree builder.
- *
- * No LLM call, no AI-service round trip --- this runs entirely in-process
- * against the already spell-corrected query text (same SymSpellUtil pass
- * Advanced Search uses) and hands its output to the EXACT SAME evaluator
- * (SearchService.classifyAndEvaluate / resolveAndLookupLeaf) that Advanced
- * Search uses. Only tree CONSTRUCTION differs between the two pipelines;
- * entity resolution (fuzzy person/location matching, lemmatized vocab
- * lookup, date/time range math) is fully shared, so a query this class CAN
- * parse behaves identically to Advanced Search.
- *
- * Deliberately mirrors QueryTreeRepair's own conservative trigger-word
- * design (same NEGATION_TRIGGERS set, same "do nothing / degrade safely
- * when ambiguous" philosophy) instead of inventing a second, divergent
- * grammar that could silently drift from Advanced Search's behavior.
- *
- * Known, intentional limitations:
- * - Only a fixed, closed trigger-word vocabulary is understood (see
- *   NOT_TRIGGERS / OR_TRIGGERS / AND_TRIGGERS below). Phrasing outside
- *   this list is read as plain VOCAB text, not an operator --- e.g. "aside
- *   from X" won't be recognized as negation the way an LLM would infer it.
- * - Once a query enters NOT mode, a bare "and"/"or" immediately after does
- *   NOT switch the mode back --- it's read as "also this, same bucket".
- *   This is what makes "sasha and abraham" both land in must_not for
- *   "... without sasha and abraham". Only clause punctuation (, ; .)
- *   resets back to the default AND mode.
- * - A comma-separated OR list ("a beach, a park, or a forest") is not
- *   specially recognized as a single three-way OR --- the comma resets to
- *   AND mode, so only the pair immediately around the final bare "or" is
- *   treated as alternatives. This is a known gap, distinct from the
- *   two/three-way bare "A or B [or C]" case (with no commas), which IS
- *   handled correctly (see buildTree's OR_TRIGGERS handling below).
- * - A date/time expression needs a year (for dates) somewhere in it to be
- *   treated as DATE; otherwise it's left as ordinary VOCAB text, matching
- *   the same fallback Advanced Search's LLM prompt is instructed to use.
- * - Cross-month/cross-year ranges ("June to August 2024", "2020 to 2023")
- *   ARE computed with real calendar arithmetic here (java.time), which is
- *   actually something Advanced Search's LLM is explicitly told NOT to
- *   attempt itself (it's told never to compute exact month lengths) --- so
- *   this pipeline is, if anything, more precise for that specific case.
- * - A literal clock time (e.g. "9:25 am", "3 pm") is only recognized when
- *   it carries either an explicit colon-separated minute or an explicit
- *   am/pm marker --- a bare number is never treated as a time, so it can
- *   never collide with an unrelated numeric term elsewhere in a query.
- */
+
 public final class DeterministicQueryParser {
 
     private DeterministicQueryParser() {
     }
-
-    // ------------------------------------------------------------------
-    // Word lists
-    // ------------------------------------------------------------------
-
-    // Never becomes a search term and never changes must/should/must_not
-    // mode --- pure noise words. Deliberately a SEPARATE list from
-    // SymSpellUtil.STOPWORDS: that list exists purely to protect spelling
-    // correction and includes "and"/"or"/"not"/"but", which we need as
-    // live structural signals here, not noise to discard.
-    //
-    // "taken" and "between" were added after discovering that time-based
-    // queries like "photos taken at 9:25 am" and "photos taken between
-    // 2:30 pm and 6:40 pm" were leaking "taken"/"between" through as
-    // ordinary VOCAB terms with zero matches, which silently zeroed out
-    // the entire AND'd result even when the actual date/time term
-    // resolved correctly. Neither word is used as a structural trigger
-    // anywhere else in this class, and "between" is already fully
-    // consumed by tryParseRange whenever a range successfully parses ---
-    // this only affects the fallback path where it doesn't.
     private static final Set<String> FILLER_WORDS = Set.of(
             "photo", "photos", "picture", "pictures", "image", "images", "pic", "pics",
             "me", "my", "give", "show", "find", "of", "the", "a", "an",
@@ -89,10 +24,6 @@ public final class DeterministicQueryParser {
             "taken", "between"
     );
 
-    // Deliberately IDENTICAL to QueryTreeRepair.NEGATION_TRIGGERS --- kept
-    // in sync on purpose so a query that Advanced Search's repair step
-    // would have to fix instead parses correctly here from the start, and
-    // so both pipelines agree on what counts as negation.
     private static final Set<String> NOT_TRIGGERS = Set.of("without", "excluding", "except", "not");
     private static final Set<String> OR_TRIGGERS = Set.of("or");
     private static final Set<String> AND_TRIGGERS = Set.of("and");
@@ -115,9 +46,6 @@ public final class DeterministicQueryParser {
         return map;
     }
 
-    // Fixed clock windows for words that describe WHEN in the day a photo
-    // was taken --- the same judgment call Advanced Search's LLM prompt
-    // makes, just hard-coded here instead of inferred per-query.
     private static final Map<String, String[]> TIME_OF_DAY = Map.of(
             "morning", new String[]{"05:00", "11:59"},
             "afternoon", new String[]{"12:00", "16:59"},
@@ -125,29 +53,17 @@ public final class DeterministicQueryParser {
             "night", new String[]{"21:00", "04:59"}
     );
 
-    // ':' added so a literal clock time like "9:25" tokenizes as one
-    // token instead of shredding into "9" and "25". Never collides with
-    // anything else --- ':' was not previously meaningful to this class
-    // in any way (not a clause boundary, not a trigger word).
+
     private static final Pattern TOKEN_PATTERN = Pattern.compile("[a-zA-Z0-9:]+|[,;.]");
     private static final Pattern DAY_PATTERN = Pattern.compile("(\\d{1,2})(?:st|nd|rd|th)?");
 
-    // Matches "9", "9:25", "9am", "9:25am" (am/pm fused into the same
-    // token) as well as "9" / "9:25" on their own (am/pm may instead be
-    // the NEXT token --- see tryParseLiteralTimeAtom).
     private static final Pattern LITERAL_TIME_PATTERN = Pattern.compile("(\\d{1,2})(?::(\\d{2}))?(am|pm)?");
 
     private static final int MODE_AND = 0;
     private static final int MODE_OR = 1;
     private static final int MODE_NOT = 2;
 
-    // Sentinel used internally to blank out the 2nd..nth token of a
-    // matched multi-word entity span. Never leaks past extractMultiWordEntities.
     private static final Object CONSUMED_MARKER = new Object();
-
-    // ------------------------------------------------------------------
-    // Entry point
-    // ------------------------------------------------------------------
 
     public static SearchExpression parse(String correctedQuery, List<String> knownNames, List<String> knownLocations) {
         List<String> tokens = tokenize(correctedQuery);
@@ -164,13 +80,6 @@ public final class DeterministicQueryParser {
         return tokens;
     }
 
-    // ------------------------------------------------------------------
-    // Pass 1 --- date / time extraction (including ranges)
-    //
-    // Runs BEFORE anything else touches "from"/"to"/"between"/"and",
-    // since those words mean something different inside a date phrase
-    // than they do as boolean operators.
-    // ------------------------------------------------------------------
 
     private static List<Object> extractDateTimeSpans(List<String> tokens) {
         List<Object> out = new ArrayList<>();
@@ -240,8 +149,6 @@ public final class DeterministicQueryParser {
         int endIndex;
     }
 
-    /** Tries "between A and B" / "from A to B" / "A to B", for date atoms,
-     *  TIME_OF_DAY word atoms, and literal clock-time atoms alike. */
     private static RangeMatch tryParseRange(List<String> tokens, int start) {
         if (start >= tokens.size()) return null;
 
@@ -296,8 +203,6 @@ public final class DeterministicQueryParser {
         return rangeMatch(leaf, secondIdx + 1);
     }
 
-    /** Tries "A <joiner> B" where A and B are both literal clock times,
-     *  e.g. "2:30 pm and 6:40 pm" or "3 pm and 5 pm". */
     private static RangeMatch tryParseLiteralTimeRange(List<String> tokens, int start, String joiner) {
         TimeAtom a = tryParseLiteralTimeAtom(tokens, start);
         if (a == null) return null;
@@ -308,14 +213,6 @@ public final class DeterministicQueryParser {
         return rangeMatch(leaf, b.endIndex);
     }
 
-    /**
-     * Recognizes a literal clock time at {@code start}: "9:25", "9:25am",
-     * "9:25 am", "9am", or "9 am". Deliberately requires either a
-     * colon-separated minute component OR an explicit am/pm marker (fused
-     * into the same token or as the very next token) --- a bare number
-     * like "9" on its own is never treated as a time, so this can never
-     * misfire on an unrelated number elsewhere in a query.
-     */
     private static TimeAtom tryParseLiteralTimeAtom(List<String> tokens, int start) {
         if (start >= tokens.size()) return null;
         Matcher m = LITERAL_TIME_PATTERN.matcher(tokens.get(start));
@@ -339,8 +236,6 @@ public final class DeterministicQueryParser {
             }
         }
 
-        // Require a colon OR an explicit am/pm --- otherwise this is just
-        // an ordinary number, not a time.
         if (minute == null && meridiem == null) return null;
         if (minute == null) minute = 0;
         if (minute < 0 || minute > 59) return null;
@@ -409,7 +304,7 @@ public final class DeterministicQueryParser {
             DateAtom atom = new DateAtom();
             atom.month = month;
             atom.endIndex = start + 1;
-            return atom; // no year found nearby --- caller discards this (see hasYear() check)
+            return atom;
         }
 
         if (isYear(t0)) {
@@ -443,24 +338,11 @@ public final class DeterministicQueryParser {
         return dateLeaf("01-01-" + atom.year, atom.year);
     }
 
-    /**
-     * Combines two date atoms into one DATE leaf spanning both. Unlike the
-     * LLM (deliberately told never to do calendar arithmetic itself), this
-     * is plain Java and can safely compute a real month length, so a
-     * genuine cross-month range like "June to August 2024" gets a true
-     * 01-06-2024 -> 31-08-2024 span, not just the same-month shortcut
-     * Advanced Search's prompt documents.
-     */
     private static TermLeaf combineRangeAtoms(DateAtom a, DateAtom b) {
         String yearA = a.year != null ? a.year : b.year;
         String yearB = b.year != null ? b.year : a.year;
         if (yearA == null || yearB == null) return null; // no year anywhere --- can't build a reliable range
 
-        // Pure year-to-year range (neither side named a month) --- reuses
-        // the existing single-value/"YYYY" range_end branch in
-        // SearchService.lookupDate() as-is; it already spans Jan 1 of the
-        // start year to Dec 31 of whatever year range_end names, so this
-        // works correctly even when the two years differ.
         if (a.month == null && b.month == null) {
             return dateLeaf("01-01-" + yearA, yearB);
         }
@@ -503,17 +385,6 @@ public final class DeterministicQueryParser {
         return leaf;
     }
 
-    // ------------------------------------------------------------------
-    // Pass 2 --- multi-word known-entity matching ("kabir singh", "tamil
-    // nadu", "los angeles"). Single-word names/locations need no special
-    // handling here: resolveAndLookupLeaf() downstream already fuzzy-
-    // matches every leaf's value against the full known-name/location
-    // lists regardless of the domain this class assigns, so a lone token
-    // like "riya" or "bangalore" resolves correctly on its own. This pass
-    // exists ONLY so a multi-word entity doesn't get split into several
-    // separately-ANDed single-word leaves.
-    // ------------------------------------------------------------------
-
     private static List<Object> extractMultiWordEntities(List<Object> stream, List<String> knownNames,
                                                          List<String> knownLocations) {
         List<String> phrases = new ArrayList<>();
@@ -525,8 +396,6 @@ public final class DeterministicQueryParser {
         }
         if (phrases.isEmpty()) return stream;
 
-        // Longest phrases first, so a 3-word name is preferred over
-        // accidentally matching just part of it against something else.
         phrases.sort((a, b) -> Integer.compare(wordCount(b), wordCount(a)));
 
         List<Object> result = new ArrayList<>(stream);
@@ -552,7 +421,7 @@ public final class DeterministicQueryParser {
                         consumed[i + j] = true;
                         result.set(i + j, CONSUMED_MARKER);
                     }
-                    break; // don't try to re-match this phrase overlapping the span it just consumed
+                    break;
                 }
             }
         }
@@ -572,10 +441,6 @@ public final class DeterministicQueryParser {
         }
         return true;
     }
-
-    // ------------------------------------------------------------------
-    // Pass 3 --- must / should / must_not tree construction
-    // ------------------------------------------------------------------
 
     private static SearchExpression buildTree(List<Object> stream) {
         int mode = MODE_AND;
@@ -602,18 +467,6 @@ public final class DeterministicQueryParser {
             if (OR_TRIGGERS.contains(token)) {
                 if (mode == MODE_AND) {
                     mode = MODE_OR;
-                    // "A or B": A was tentatively placed in mustList a
-                    // moment ago under the AND assumption that held right
-                    // up until this token. Now that we know this is
-                    // actually an OR, move it into shouldList so the pair
-                    // becomes a real two-way OR instead of an accidental
-                    // "A AND (should contain B)". Only the single term
-                    // immediately preceding this trigger is moved, so a
-                    // chained "A or B or C" correctly ends up with all
-                    // three in should (the second "or" is a no-op here
-                    // since mode is already MODE_OR), while "without X or
-                    // Y" is untouched (mode is MODE_NOT, not MODE_AND, so
-                    // this branch never runs).
                     if (!mustList.isEmpty()) {
                         shouldList.add(mustList.remove(mustList.size() - 1));
                     }
@@ -621,7 +474,7 @@ public final class DeterministicQueryParser {
                 continue;
             }
             if (AND_TRIGGERS.contains(token)) {
-                continue; // deliberately no mode change --- see class-level note
+                continue;
             }
             if (FILLER_WORDS.contains(token)) {
                 continue;
@@ -659,8 +512,6 @@ public final class DeterministicQueryParser {
 
     private static SearchExpression assembleRoot(List<SearchExpression> must, List<SearchExpression> should,
                                                  List<SearchExpression> mustNot) {
-        // Flatten to a single bare leaf for a plain one-term query ---
-        // same shape Advanced Search's own single-term example produces.
         if (must.size() == 1 && should.isEmpty() && mustNot.isEmpty()) {
             return must.get(0);
         }

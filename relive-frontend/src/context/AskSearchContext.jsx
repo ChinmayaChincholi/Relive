@@ -5,24 +5,21 @@ const AskSearchContext = createContext(null);
 
 export function AskSearchProvider({ children }) {
   const [query, setQuery] = useState('');
-  const [mode, setMode] = useState('advanced'); // 'advanced' | 'instant'
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
-  // Change 4 --- the AbortController for whichever search is currently in
-  // flight, so a newer query can cancel an older, still-pending one.
+  // The AbortController for the search currently in flight, so a newer
+  // query can cancel an older, still-pending one.
   const activeControllerRef = useRef(null);
   // Guards against an aborted request's promise still settling out of
   // order before the abort is observed --- only the response matching the
   // most recently STARTED search is ever applied to state.
   const latestRequestIdRef = useRef(0);
 
-  const runSearch = useCallback(async (rawQuery, searchMode) => {
+  const runSearch = useCallback(async (rawQuery) => {
     const trimmed = rawQuery.trim();
     if (!trimmed) return;
-
-    const effectiveMode = searchMode || mode;
 
     if (activeControllerRef.current) {
       activeControllerRef.current.abort();
@@ -36,7 +33,7 @@ export function AskSearchProvider({ children }) {
     setLoading(true);
 
     try {
-      const data = await searchNatural(trimmed, effectiveMode, controller.signal);
+      const data = await searchNatural(trimmed, controller.signal);
       if (requestId !== latestRequestIdRef.current) return; // superseded
       setResults(data);
     } catch (err) {
@@ -48,9 +45,9 @@ export function AskSearchProvider({ children }) {
     } finally {
       if (requestId === latestRequestIdRef.current) setLoading(false);
     }
-  }, [mode]);
+  }, []);
 
-  const value = { query, setQuery, mode, setMode, results, loading, searched, runSearch };
+  const value = { query, setQuery, results, loading, searched, runSearch };
   return (
     <AskSearchContext.Provider value={value}>
       {children}

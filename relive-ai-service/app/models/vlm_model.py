@@ -1,7 +1,7 @@
 """
 Vision model — Qwen2.5-VL, used only for image processing step 9 (21-category
 vocabulary generation). See app/models/llm_model.py for the separate
-text-only model (query parsing, synonym generation).
+text-only model (synonym generation).
 
 All 21 categories are sent in ONE call (one image encoding) rather than
 21 separate calls — confirmed via logs that llama-cpp-python's
@@ -122,11 +122,7 @@ _VOCAB_SCHEMA = {
                     "words": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "maxItems": 40,  # generous backstop only — not expected to bind;
-                        # prevents a runaway loop from ever eating the
-                        # whole token budget now that repeat_penalty
-                        # (which was also functioning as an accidental
-                        # brake) is being removed below.
+                        "maxItems": 40,
                     },
                 },
                 "required": ["scratchpad", "words"],

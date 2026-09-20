@@ -157,14 +157,27 @@ export default function Faces() {
 
   const handleDelete = async () => {
     setDeleting(true);
+    const deletedIds = new Set();
+    let failedCount = 0;
     for (const id of selectedIds) {
-      try { await deletePerson(id); } catch (e) { console.error('Delete failed for', id, e); }
+      try {
+        await deletePerson(id);
+        deletedIds.add(id);
+      } catch (e) {
+        failedCount++;
+        console.error('Delete failed for', id, e);
+      }
     }
+    // Drop the groups that were actually deleted from the page right away.
+    setPeople(prev => prev.filter(p => !deletedIds.has(p.personId)));
     setSelectedIds(new Set());
     setSelectMode(false);
     setDeleting(false);
     setConfirmDeleteOpen(false);
     await fetchPeople();
+    if (failedCount > 0) {
+      alert(`${failedCount} group${failedCount > 1 ? 's' : ''} could not be deleted. Make sure the backend is running and try again.`);
+    }
   };
 
   return (

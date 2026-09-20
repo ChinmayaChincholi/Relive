@@ -1,11 +1,28 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useNavigate, useLocation, useNavigationType } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import ConfirmModal from '../components/ConfirmModal';
 import { getMyMedia, getImageUrl, deleteMedia } from '../services/mediaService';
 
+// Scroll position of this page's scroll container, remembered when the user
+// leaves to view a photo's details so it can be restored when they come back.
+// Module-level so it survives this component unmounting.
+let savedScrollTop = null;
+
 export default function Media() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  const scrollRef = useRef(null);
+
+  // Restore the old position only when returning from a photo's details page
+  // (the ← button passes restoreScroll) or via the browser's back button
+  // (POP). A fresh visit from the sidebar starts at the top as usual.
+  const shouldRestoreRef = useRef(
+    location.state?.restoreScroll === true || navigationType === 'POP'
+  );
+  const scrollRestoredRef = useRef(false);
+
   const [mediaList, setMediaList] = useState([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
@@ -26,6 +43,18 @@ export default function Media() {
     const interval = setInterval(loadMedia, 8000);
     return () => clearInterval(interval);
   }, []);
+
+  // Once the photo grid has actually rendered (loading finished), put the
+  // page back where the user was. Doing it earlier wouldn't work: the list is
+  // empty until the data arrives, so there'd be nothing to scroll.
+  useLayoutEffect(() => {
+    if (loading || scrollRestoredRef.current) return;
+    scrollRestoredRef.current = true;
+    if (shouldRestoreRef.current && savedScrollTop !== null && scrollRef.current) {
+      scrollRef.current.scrollTop = savedScrollTop;
+    }
+    savedScrollTop = null;
+  }, [loading]);
 
   const filtered = mediaList.filter(m => {
     if (filter === 'processing') return m.status === 'PROCESSING';
@@ -79,17 +108,24 @@ export default function Media() {
     loadMedia();
   };
 
+  // Every route to a photo's details page goes through here so the scroll
+  // position is always remembered first.
+  const openDetails = (id) => {
+    savedScrollTop = scrollRef.current ? scrollRef.current.scrollTop : null;
+    navigate(`/media/${id}`);
+  };
+
   const handleViewDetails = () => {
     if (selected.size !== 1) return;
     const [onlyId] = selected;
-    navigate(`/media/${onlyId}`);
+    openDetails(onlyId);
   };
 
   const renderPhotoCard = (item) => (
     <div
       key={item.id}
       onClick={() => selectMode && toggleSelect(item.id)}
-      onDoubleClick={() => navigate(`/media/${item.id}`)}
+      onDoubleClick={() => openDetails(item.id)}
       style={{
         borderRadius: '10px', overflow: 'hidden',
         background: 'var(--surface)',
@@ -159,21 +195,13 @@ export default function Media() {
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           marginBottom: '4px',
         }}>{item.fileName}</div>
-        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-          {item.faceCount > 0 && (
-            <span style={{ fontSize: '9px', color: 'var(--text3)' }}>👤 {item.faceCount}</span>
-          )}
-          {item.eventType && (
-            <span style={{ fontSize: '9px', color: 'var(--text3)' }}>· {item.eventType}</span>
-          )}
-        </div>
       </div>
     </div>
   );
 
   return (
-    <AppLayout>
-      <div style={{ padding: '24px' }}>
+    <AppLayout scrollRef={scrollRef}>
+      <div>
         <ConfirmModal
           open={confirmDeleteOpen}
           title={`Delete ${selected.size} photo${selected.size > 1 ? 's' : ''}?`}
@@ -185,7 +213,14 @@ export default function Media() {
           onCancel={() => setConfirmDeleteOpen(false)}
         />
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
+        {/* Sticky header: title + Select stay visible while scrolling */}
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 20,
+          background: 'var(--bg)',
+          borderBottom: '1px solid var(--border)',
+          padding: '20px 24px 14px',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+        }}>
           <div>
             <div style={{ fontFamily: 'Syne, sans-serif', fontSize: '20px', fontWeight: '800', marginBottom: '2px' }}>
               All Photos
@@ -219,89 +254,95 @@ export default function Media() {
             <button
               onClick={() => { setSelectMode(s => !s); setSelected(new Set()); }}
               style={{
-                padding: '10px 20px', background: selectMode ? 'rgba(245,158,11,0.1)' : 'var(--surface)',
-                border: `1px solid ${selectMode ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
-                borderRadius: '9px', fontSize: '13px', fontWeight: '600',
-                color: selectMode ? '#f59e0b' : 'var(--text2)', cursor: 'pointer',
+                padding: '10px 22px',
+                background: selectMode ? 'rgba(245,158,11,0.12)' : 'linear-gradient(135deg, #f59e0b, #d97706)',
+                border: selectMode ? '1px solid rgba(245,158,11,0.6)' : 'none',
+                borderRadius: '9px', fontSize: '13px', fontWeight: '700',
+                fontFamily: 'Syne, sans-serif',
+                color: selectMode ? '#f59e0b' : '#1c1004',
+                boxShadow: selectMode ? 'none' : '0 2px 10px rgba(245,158,11,0.25)',
+                cursor: 'pointer',
               }}
             >{selectMode ? 'Cancel' : 'Select'}</button>
           </div>
         </div>
 
-        {/* Hint banner */}
-        <div style={{
-          background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)',
-          borderRadius: '10px', padding: '10px 14px', marginBottom: '16px',
-          fontSize: '12px', color: '#fbbf24',
-        }}>
-          💡 Double click on an image to view its details. Single click to select it.
-        </div>
-
-        {/* Filters */}
-        <div style={{ display: 'flex', gap: '6px', marginBottom: '20px' }}>
-          {[['all', 'All'], ['processing', 'Processing'], ['ready', 'Ready']].map(([val, label]) => (
-            <button
-              key={val}
-              onClick={() => setFilter(val)}
-              style={{
-                padding: '6px 14px', borderRadius: '7px', fontSize: '12px',
-                border: filter === val ? '1px solid rgba(245,158,11,0.4)' : '1px solid var(--border)',
-                background: filter === val ? 'rgba(245,158,11,0.1)' : 'transparent',
-                color: filter === val ? '#fbbf24' : 'var(--text3)',
-                cursor: 'pointer', transition: 'all 0.15s',
-              }}
-            >{label}</button>
-          ))}
-        </div>
-
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text3)' }}>Loading your photos...</div>
-        ) : filtered.length === 0 ? (
+        <div style={{ padding: '18px 24px 24px' }}>
+          {/* Hint banner */}
           <div style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: '14px', padding: '60px 24px', textAlign: 'center',
-            color: 'var(--text3)', fontSize: '13px',
+            background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)',
+            borderRadius: '10px', padding: '10px 14px', marginBottom: '16px',
+            fontSize: '12px', color: '#fbbf24',
           }}>
-            <div style={{ fontSize: '36px', marginBottom: '14px' }}>🖼️</div>
-            No photos yet. Import some to get started.
+            💡 Double click on an image to view its details
           </div>
-        ) : (
-          <>
-            {/* Photos with dateTaken grouped by month */}
-            {Object.entries(groupedWithDate).map(([month, items]) => (
-              <div key={month} style={{ marginBottom: '24px' }}>
-                <div style={{
-                  fontSize: '12px', fontWeight: '600', color: 'var(--text3)',
-                  marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
-                }}>{month}</div>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-                  gap: '6px',
-                }}>
-                  {items.map(renderPhotoCard)}
-                </div>
-              </div>
-            ))}
 
-            {/* Photos without dateTaken */}
-            {withoutDate.length > 0 && (
-              <div style={{ marginBottom: '24px' }}>
-                <div style={{
-                  fontSize: '12px', fontWeight: '600', color: 'var(--text3)',
-                  marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
-                }}>No date info</div>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-                  gap: '6px',
-                }}>
-                  {withoutDate.map(renderPhotoCard)}
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '20px' }}>
+            {[['all', 'All'], ['processing', 'Processing'], ['ready', 'Ready']].map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setFilter(val)}
+                style={{
+                  padding: '6px 14px', borderRadius: '7px', fontSize: '12px',
+                  border: filter === val ? '1px solid rgba(245,158,11,0.4)' : '1px solid var(--border)',
+                  background: filter === val ? 'rgba(245,158,11,0.1)' : 'transparent',
+                  color: filter === val ? '#fbbf24' : 'var(--text3)',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+              >{label}</button>
+            ))}
+          </div>
+
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text3)' }}>Loading your photos...</div>
+          ) : filtered.length === 0 ? (
+            <div style={{
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: '14px', padding: '60px 24px', textAlign: 'center',
+              color: 'var(--text3)', fontSize: '13px',
+            }}>
+              <div style={{ fontSize: '36px', marginBottom: '14px' }}>🖼️</div>
+              No photos yet. Import some to get started.
+            </div>
+          ) : (
+            <>
+              {/* Photos with dateTaken grouped by month */}
+              {Object.entries(groupedWithDate).map(([month, items]) => (
+                <div key={month} style={{ marginBottom: '24px' }}>
+                  <div style={{
+                    fontSize: '12px', fontWeight: '600', color: 'var(--text3)',
+                    marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
+                  }}>{month}</div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                    gap: '6px',
+                  }}>
+                    {items.map(renderPhotoCard)}
+                  </div>
                 </div>
-              </div>
-            )}
-          </>
-        )}
+              ))}
+
+              {/* Photos without dateTaken */}
+              {withoutDate.length > 0 && (
+                <div style={{ marginBottom: '24px' }}>
+                  <div style={{
+                    fontSize: '12px', fontWeight: '600', color: 'var(--text3)',
+                    marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px',
+                  }}>No date info</div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                    gap: '6px',
+                  }}>
+                    {withoutDate.map(renderPhotoCard)}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </AppLayout>
   );

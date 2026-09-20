@@ -26,13 +26,6 @@ public class Media {
 
     private LocalDateTime uploadedAt;
 
-    @Column(length = 3000)
-    private String sceneCaption;
-
-    private String eventType;
-
-    private Integer faceCount;
-
     @Column(nullable = false)
     private String status;
 

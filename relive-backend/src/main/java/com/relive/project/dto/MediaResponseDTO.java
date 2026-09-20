@@ -10,15 +10,10 @@ public class MediaResponseDTO {
 
     private String fileName;
 
-    private String sceneCaption;
-
-    private Integer faceCount;
-
     private String status;
 
     private LocalDateTime dateTaken;
 
     private String location;
 
-    private String eventType;
 }
